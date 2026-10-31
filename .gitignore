@@ -1,0 +1,19 @@
+Configuration/Local.xcconfig
+artifacts/
+build/
+DerivedData/
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+TestAudio/
+Configuration/release.env
+# Built from pinned sources by scripts/build-engine.sh; its sha256 list is committed next to it
+Packages/FreeFlowEngine/FreeFlowSpeech.xcframework/
+# Signing and App Store Connect credentials never belong in the tree
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile

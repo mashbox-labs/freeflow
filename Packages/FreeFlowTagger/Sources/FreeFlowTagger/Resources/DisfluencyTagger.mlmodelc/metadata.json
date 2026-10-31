@@ -1,0 +1,82 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "Free Flow disfluency tagger (token classifier: O keep, R reparandum, F filler, E editing term, D discourse marker)",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32)",
+        "shortDescription" : "",
+        "shape" : "[]",
+        "name" : "logits",
+        "type" : "MultiArray"
+      }
+    ],
+    "storagePrecision" : "Mixed (Float16, Int32, UInt16)",
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 9,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.linear" : 74,
+      "Ios18.matmul" : 24,
+      "Select" : 1,
+      "Ios18.gelu" : 12,
+      "Ios18.gather" : 28,
+      "Ios18.concat" : 25,
+      "Shape" : 14,
+      "Ios18.add" : 26,
+      "Ios18.realDiv" : 1,
+      "Ios18.softmax" : 12,
+      "Ios18.sliceByIndex" : 1,
+      "Ios18.layerNorm" : 25,
+      "Ios18.cast" : 43,
+      "Tile" : 1,
+      "Ios18.gatherAlongAxis" : 1,
+      "Ios18.equal" : 1,
+      "Ios18.reshape" : 48,
+      "Ios18.transpose" : 48,
+      "Ios18.mul" : 12
+    },
+    "computePrecision" : "Mixed (Float16, Float32, Int16, Int32, UInt16)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "inputSchema" : [
+      {
+        "dataType" : "Int32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "1 × 2...256",
+        "shapeRange" : "[[1, 1], [2, 256]]",
+        "formattedType" : "MultiArray (Int32 1 × 32)",
+        "type" : "MultiArray",
+        "shape" : "[1, 32]",
+        "name" : "input_ids",
+        "shortDescription" : ""
+      }
+    ],
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.conversion_date" : "2026-10-29",
+      "com.github.apple.coremltools.source" : "torch==2.15.0+cpu",
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.source_dialect" : "TorchScript"
+    },
+    "generatedClassName" : "DisfluencyTagger",
+    "method" : "predict"
+  }
+]

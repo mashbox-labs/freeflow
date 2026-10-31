@@ -1,0 +1,6 @@
+// Public build settings for Free Flow. Identifiers and signing come from Local.xcconfig,
+// which is git-ignored. Copy Local.xcconfig.template to Local.xcconfig and fill it in.
+FF_BUNDLE_PREFIX = org.example
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"
+FF_APP_GROUP = group.$(FF_BUNDLE_PREFIX).freeflow

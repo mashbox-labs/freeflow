@@ -1,0 +1,16 @@
+{
+ "tap": {
+  "sd_x_mm": 1.648,
+  "sd_y_mm": 1.648,
+  "mean_x_mm": 0.0,
+  "mean_y_mm": 0.0,
+  "relative_sd_per_width": 0.0,
+  "source": "Bi, Li, Zhai, FFitts law, CHI 2013, Table 5 (index-finger typing, We = sqrt(2*pi*e)*SDxy, mean of 9 digraph rows); per axis = SDxy/sqrt(2). Mean offsets 0: Azenkot & Zhai MobileHCI 2012 report vertical offsets of 2.16 px (two thumbs) and 4.69 px (one finger), well under 0.5 mm."
+ },
+ "fitts": {
+  "a_s": 0.1151,
+  "b_s_per_bit": 0.0756,
+  "r2": 0.798,
+  "source": "Least-squares fit of Shannon-form Fitts ID_n = log2(A/W+1), W=5 mm, to the 9 rows of FFitts Table 5 (mean times, ms)."
+ }
+}

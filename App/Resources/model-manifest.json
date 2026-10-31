@@ -1,0 +1,446 @@
+{
+ "bark-3-pro": {
+  "bytes": 1234585331,
+  "files": {
+   "Decoder.mlpackage/Data/com.apple.CoreML/model.mlmodel": {
+    "sha256": "00cd3bdf438e859eff16d1376cab86f6214d0e44b1876316e30550e35d012763",
+    "size": 11612
+   },
+   "Decoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin": {
+    "sha256": "b6bfa9053e8e20d1e80a7522ddba5c66e2c8c77cfc956d4ebccf749baf4d3d69",
+    "size": 23604992
+   },
+   "Decoder.mlpackage/Manifest.json": {
+    "sha256": "123808ff526bf8d5f47b69d5833ff91477f438f92056a3531ae0a7b4f2945d7e",
+    "size": 617
+   },
+   "Encoder.mlpackage/Data/com.apple.CoreML/model.mlmodel": {
+    "sha256": "d82718558f523dc13f9c0ede57d6f8e37d953950808a5aaa3a4633a7f752dd77",
+    "size": 1206573
+   },
+   "Encoder.mlpackage/Data/com.apple.CoreML/weights/weight.bin": {
+    "sha256": "619757bd47bc5cc131a85e54e94ffacc1b8c1bce737c1f1f6569eda8621a30d6",
+    "size": 1195742464
+   },
+   "Encoder.mlpackage/Manifest.json": {
+    "sha256": "a6f16e318952af66b69fa84820b6417846ad0c9208a3c2779aa788a7c244a75e",
+    "size": 617
+   },
+   "JointDecisionv3.mlpackage/Data/com.apple.CoreML/model.mlmodel": {
+    "sha256": "1057c2d9e9efce23258dbf2e7747e6facf7a42f4fcbcf2a21cdd160e065b18ac",
+    "size": 8759
+   },
+   "JointDecisionv3.mlpackage/Data/com.apple.CoreML/weights/weight.bin": {
+    "sha256": "90257de4d4582921c31db6efe9668017274b7c4cfdfe5aac9b9183233f7a9bdd",
+    "size": 12642764
+   },
+   "JointDecisionv3.mlpackage/Manifest.json": {
+    "sha256": "264b4403e1cada9a6148a10190e91b9e7fe6ead871db0aedcd87d2f4d84df1e7",
+    "size": 617
+   },
+   "LICENSE": {
+    "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+    "size": 18657
+   },
+   "NOTICE": {
+    "sha256": "6bd6d22b4414b3ac97869dd8a97a813d668216ef66b04148ac858b988f8d063d",
+    "size": 611
+   },
+   "Preprocessor.mlpackage/Data/com.apple.CoreML/model.mlmodel": {
+    "sha256": "dd4a5266ed9048aae620e73aa983eab93256654a343ded1226f9456b79f79a67",
+    "size": 18839
+   },
+   "Preprocessor.mlpackage/Data/com.apple.CoreML/weights/weight.bin": {
+    "sha256": "7a31e2bd311bfa97ea3fe73d4a6c029824327a71590397bd8784089a88754a77",
+    "size": 1184512
+   },
+   "Preprocessor.mlpackage/Manifest.json": {
+    "sha256": "75753d7f53c12f47bef18a0f84eacdf8e7e93db1a2e3af368c50b4f686317220",
+    "size": 617
+   },
+   "parakeet_v3_vocab.json": {
+    "sha256": "3c278905d679b4b3e6b7be337edb8f9c0fce73a3708d5fe7a4a3bc7a12e719e1",
+    "size": 143080
+   }
+  },
+  "license_tag": "cc-by-4.0",
+  "repo": "ConwayResearch/Underdog-Bark-3.0-Pro",
+  "revision": "4b5c51e04aa8d16dda9ecdff71bc29f7360149e4",
+  "subfolder": "coreml"
+ },
+ "bark-3.0-clean": {
+  "bytes": 447420698,
+  "files": {
+   "Decoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "d00e8baa4b1d7fc164d7cbbb96ed294d531ba6fb684a1aa79f66d4e4fbdbd5da",
+    "size": 243
+   },
+   "Decoder.mlmodelc/coremldata.bin": {
+    "sha256": "b33a57a008e7b138574bac1219037aadd7054caebfc42d0fa4adc97050f6a836",
+    "size": 569
+   },
+   "Decoder.mlmodelc/metadata.json": {
+    "sha256": "de3e22da7619f1ba9ae8ab3676ece49a999b93b3ca2a6653687c54b0e69419fc",
+    "size": 3433
+   },
+   "Decoder.mlmodelc/model.mil": {
+    "sha256": "34bd2cc0a00dd7a485f0aa90f58d6b516c94ee8f4842de92aad7b581849df289",
+    "size": 13110
+   },
+   "Decoder.mlmodelc/weights/weight.bin": {
+    "sha256": "6220cd08cb7eaacf5106da134c40f57e13783342c09f1be250dd31cc1b8b8a94",
+    "size": 23604992
+   },
+   "Encoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "8f6763508e0d6caad8152bcc72cf8be1647f568c3cdc5c5ff9732c1c69e2734c",
+    "size": 243
+   },
+   "Encoder.mlmodelc/coremldata.bin": {
+    "sha256": "e08f511d23e5642bc45f6ecc0bc930e00f8f105d6a6c33fe03f83c8da9253070",
+    "size": 557
+   },
+   "Encoder.mlmodelc/model.mil": {
+    "sha256": "0442825ac24b17cd861db7a8bda7cda16c3372c8228331e640196965f190583d",
+    "size": 1012893
+   },
+   "Encoder.mlmodelc/weights/weight.bin": {
+    "sha256": "4216107d2214bd058aec94c2e0f9a7e8114f5274cf0c6a28ffb8f21ea56337eb",
+    "size": 409451136
+   },
+   "JointDecisionv3.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "a55f011ca119fc7913ffc905ef48079572c4f54b6e5ed34a033f69c5422be0b6",
+    "size": 243
+   },
+   "JointDecisionv3.mlmodelc/coremldata.bin": {
+    "sha256": "2f5d97969689b6397b8f2e8ba31a1d4684a41ec373ecf56d4ee751efb2ca5073",
+    "size": 601
+   },
+   "JointDecisionv3.mlmodelc/metadata.json": {
+    "sha256": "989223d0134de212bb206b7311b9f7038d26f86d0d43a88b17deee895d0a931e",
+    "size": 3577
+   },
+   "JointDecisionv3.mlmodelc/model.mil": {
+    "sha256": "167357ff6d558349e745047c6e3f610010d047ec21ab6f56df2dbb041f096baa",
+    "size": 11777
+   },
+   "JointDecisionv3.mlmodelc/weights/weight.bin": {
+    "sha256": "4575e6ec06917259358cf17307fe7aa38d364b736e4b6c9b6e3d49169c760eee",
+    "size": 12642764
+   },
+   "NOTICE": {
+    "sha256": "4e627d41fa10efedd84a7dbb915711b0b73c904af1fee8bacdd4a2387bcc5a10",
+    "size": 615
+   },
+   "Preprocessor.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d",
+    "size": 243
+   },
+   "Preprocessor.mlmodelc/coremldata.bin": {
+    "sha256": "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d",
+    "size": 486
+   },
+   "Preprocessor.mlmodelc/metadata.json": {
+    "sha256": "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf",
+    "size": 2841
+   },
+   "Preprocessor.mlmodelc/model.mil": {
+    "sha256": "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93",
+    "size": 28181
+   },
+   "Preprocessor.mlmodelc/weights/weight.bin": {
+    "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea",
+    "size": 491072
+   },
+   "parakeet_vocab.json": {
+    "sha256": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735",
+    "size": 151122
+   }
+  },
+  "license_tag": "cc-by-4.0",
+  "repo": "FluidInference/bark-3.0-coreml",
+  "revision": "73b0c0da665d29ea0332e9f0d32da8e26a4cdb38",
+  "subfolder": "bark-3.0-clean"
+ },
+ "parakeet-gguf-q4_0": {
+  "bytes": 355615679,
+  "files": {
+   "ggml-parakeet-tdt-0.6b-v3-q4_0.bin": {
+    "sha256": "aa7fe2f5fb47d863ca23e8b1d490632d63a2599f515268b6d6bd656158dad45e",
+    "size": 355615679
+   }
+  },
+  "license_tag": "mit",
+  "repo": "ggml-org/parakeet-GGUF",
+  "revision": "35156454d1a39de06863303dd209fd2bed6ee079",
+  "subfolder": ""
+ },
+ "parakeet-gguf-q4_k": {
+  "bytes": 415611879,
+  "files": {
+   "ggml-parakeet-tdt-0.6b-v3-q4_k.bin": {
+    "sha256": "8b205b8b39c6535e153de6fb11c51db46125d45c4f16ba496fe41a0fe71b885e",
+    "size": 415611879
+   }
+  },
+  "license_tag": "mit",
+  "repo": "ggml-org/parakeet-GGUF",
+  "revision": "35156454d1a39de06863303dd209fd2bed6ee079",
+  "subfolder": ""
+ },
+ "parakeet-gguf-q8_0": {
+  "bytes": 668757119,
+  "files": {
+   "ggml-parakeet-tdt-0.6b-v3-q8_0.bin": {
+    "sha256": "4d64e9e96c2792186d072fde0034df0ad670cf680a2f53069052ead827fd600e",
+    "size": 668757119
+   }
+  },
+  "license_tag": "mit",
+  "repo": "ggml-org/parakeet-GGUF",
+  "revision": "35156454d1a39de06863303dd209fd2bed6ee079",
+  "subfolder": ""
+ },
+ "parakeet-redux": {
+  "bytes": 220304193,
+  "files": {
+   "Decoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "7f24e7248d57024c6f1c5a2ea306f4a6a89db45a363218523bb6410c4b1aecf0",
+    "size": 243
+   },
+   "Decoder.mlmodelc/coremldata.bin": {
+    "sha256": "422da51d983e93a3e48cd6d46a17d6c32844452414c8e242fb0caaca2b8af5ed",
+    "size": 560
+   },
+   "Decoder.mlmodelc/model.mil": {
+    "sha256": "956f600207f88396017ca5c96cfa3acd5bfee60835a5b44b762e033a8fb28955",
+    "size": 13110
+   },
+   "Decoder.mlmodelc/weights/weight.bin": {
+    "sha256": "6c6c88c23ee5492a6b229e8cc636ddadb2b01ae0dd559d9cb63123bebf507d77",
+    "size": 23604992
+   },
+   "Encoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "7862e972e09315df099d4bfd320743bf106acbf7fe4343317f9de45b0635d7b7",
+    "size": 243
+   },
+   "Encoder.mlmodelc/coremldata.bin": {
+    "sha256": "ca0b212fe3c06c3ccd35e508fa61e4dfaad19dd0c55b82e4f5bf8711e7758fd9",
+    "size": 506
+   },
+   "Encoder.mlmodelc/model.mil": {
+    "sha256": "165487e314ed93c4a44dfec99d57be4e436e7c3dba6eef49fd3f0daf9de6d0d4",
+    "size": 965906
+   },
+   "Encoder.mlmodelc/weights/weight.bin": {
+    "sha256": "adbb5550dc6488717d3a1407b53122fbdb1af5e99c330ee20f8d8cfd9ec49252",
+    "size": 182389312
+   },
+   "JointDecisionv3.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "fc857a756b8c9c9f31aa9e1062766cc0a82ac035ef369d6e1cbe97184921479c",
+    "size": 243
+   },
+   "JointDecisionv3.mlmodelc/coremldata.bin": {
+    "sha256": "611ea653e2adede7cc1cfe70da36296844f97e95e2c7dd961d45230e5599389d",
+    "size": 592
+   },
+   "JointDecisionv3.mlmodelc/model.mil": {
+    "sha256": "791b3c3cf3eb2079c84623fc880f6bba008d1366e5f8b03e9a8ed8bd4d7194a0",
+    "size": 11777
+   },
+   "JointDecisionv3.mlmodelc/weights/weight.bin": {
+    "sha256": "73b0288acd115fc4c36038f66b6cbf49233182488febf5d8c787bea4009535f7",
+    "size": 12642764
+   },
+   "Preprocessor.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d",
+    "size": 243
+   },
+   "Preprocessor.mlmodelc/coremldata.bin": {
+    "sha256": "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d",
+    "size": 486
+   },
+   "Preprocessor.mlmodelc/metadata.json": {
+    "sha256": "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf",
+    "size": 2841
+   },
+   "Preprocessor.mlmodelc/model.mil": {
+    "sha256": "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93",
+    "size": 28181
+   },
+   "Preprocessor.mlmodelc/weights/weight.bin": {
+    "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea",
+    "size": 491072
+   },
+   "parakeet_vocab.json": {
+    "sha256": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735",
+    "size": 151122
+   }
+  },
+  "license_tag": "cc-by-4.0",
+  "repo": "FluidInference/parakeet-redux-coreml",
+  "revision": "8c5ef97a29cd120dc76b354b3f22b7fec3b486f9",
+  "subfolder": ""
+ },
+ "parakeet-ultra": {
+  "bytes": 632162964,
+  "files": {
+   "Decoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "fe92b6cfaa012abd5248c0bc877832f19807015abffc60d87b8ccc8ccb48b3b5",
+    "size": 243
+   },
+   "Decoder.mlmodelc/coremldata.bin": {
+    "sha256": "3b06e66768f0df7e21795f50e2b29300e33eeb1a2579dc42c695279c2d308497",
+    "size": 560
+   },
+   "Decoder.mlmodelc/model.mil": {
+    "sha256": "956f600207f88396017ca5c96cfa3acd5bfee60835a5b44b762e033a8fb28955",
+    "size": 13110
+   },
+   "Decoder.mlmodelc/weights/weight.bin": {
+    "sha256": "02a0d219f281b9665bc10c8768649403b2eebbbf4b44c627041d948e0de11bb4",
+    "size": 23604992
+   },
+   "Encoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "d87101d824d6723cf95304da33755c3c60e762663b9ef2b0c4bd0aa166a09a0d",
+    "size": 243
+   },
+   "Encoder.mlmodelc/coremldata.bin": {
+    "sha256": "397a84a4062f563cbc5f56077c674f09a61d85be5090f61d2f1932afb92ac0fe",
+    "size": 514
+   },
+   "Encoder.mlmodelc/model.mil": {
+    "sha256": "f5d601568a4171d99a314c0fe3f6bc67715da2623732a3fb566e050ea83e5848",
+    "size": 1002653
+   },
+   "Encoder.mlmodelc/weights/weight.bin": {
+    "sha256": "315ba01f33cadbf601d43ac7f5c86208b7aa75fdaa34705c9869d5abe3521c9b",
+    "size": 594211328
+   },
+   "JointDecisionv3.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "68d38ca646aebafa7a9329e2efda50f5767c49e89fdb5f77f212072bb66f97c4",
+    "size": 243
+   },
+   "JointDecisionv3.mlmodelc/coremldata.bin": {
+    "sha256": "5e3af5a4ce686f6c237cadbd9284e10d333bc0e1546633cd0e430e6194044bc4",
+    "size": 592
+   },
+   "JointDecisionv3.mlmodelc/model.mil": {
+    "sha256": "791b3c3cf3eb2079c84623fc880f6bba008d1366e5f8b03e9a8ed8bd4d7194a0",
+    "size": 11777
+   },
+   "JointDecisionv3.mlmodelc/weights/weight.bin": {
+    "sha256": "3f310b85b82341c53ec383025ab094a4e462ee1c592e1ad7c6bfe39cff66ca25",
+    "size": 12642764
+   },
+   "Preprocessor.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d",
+    "size": 243
+   },
+   "Preprocessor.mlmodelc/coremldata.bin": {
+    "sha256": "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d",
+    "size": 486
+   },
+   "Preprocessor.mlmodelc/metadata.json": {
+    "sha256": "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf",
+    "size": 2841
+   },
+   "Preprocessor.mlmodelc/model.mil": {
+    "sha256": "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93",
+    "size": 28181
+   },
+   "Preprocessor.mlmodelc/weights/weight.bin": {
+    "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea",
+    "size": 491072
+   },
+   "parakeet_vocab.json": {
+    "sha256": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735",
+    "size": 151122
+   }
+  },
+  "license_tag": "cc-by-4.0",
+  "repo": "FluidInference/parakeet-ultra-coreml",
+  "revision": "95eaa59a39d4394f047a4dc5cce480388a60d1b6",
+  "subfolder": ""
+ },
+ "phonon-2": {
+  "bytes": 378075366,
+  "files": {
+   "Decoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "3d1a9cd4d7b7956d20c48d9a8041717f9f02c6db72dfeda565080e1cff1db3a3",
+    "size": 243
+   },
+   "Decoder.mlmodelc/coremldata.bin": {
+    "sha256": "2590e4588972f8d3d1ddb10ce603decffd2e9bb79a88c6096a58c5732f6369fd",
+    "size": 554
+   },
+   "Decoder.mlmodelc/model.mil": {
+    "sha256": "956f600207f88396017ca5c96cfa3acd5bfee60835a5b44b762e033a8fb28955",
+    "size": 13110
+   },
+   "Decoder.mlmodelc/weights/weight.bin": {
+    "sha256": "05181616ed1af70b2aad0463d08d1d73a245af4ccb6159df79994f28c135d9d6",
+    "size": 23604992
+   },
+   "Encoder.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "3d674b78b1a6916586611089d7ac80b4d20d94f691c0497f92b2a58339c5a0e2",
+    "size": 243
+   },
+   "Encoder.mlmodelc/coremldata.bin": {
+    "sha256": "4b661445d3e93201e3d70d616eaa9f061117a4ee1e4a6191d18a23dc23068b84",
+    "size": 500
+   },
+   "Encoder.mlmodelc/model.mil": {
+    "sha256": "b8954fb3ef2fedcb9ce01c67f0490cfd905b79862a33912dea12100cd24a5170",
+    "size": 2734921
+   },
+   "Encoder.mlmodelc/weights/weight.bin": {
+    "sha256": "d6a51593fc07b3c81989d5f871f687e78c52998aae0b06d000faced47313edb0",
+    "size": 338391488
+   },
+   "JointDecisionv3.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "7b53f663c4400205f8bc00243076de50f95d8a1a64978dee7232eb0ddc7d683c",
+    "size": 243
+   },
+   "JointDecisionv3.mlmodelc/coremldata.bin": {
+    "sha256": "8d2170f28b28466476f62484a0c8b07c2d31713ac254d1b7cf80eba8070e9554",
+    "size": 586
+   },
+   "JointDecisionv3.mlmodelc/model.mil": {
+    "sha256": "791b3c3cf3eb2079c84623fc880f6bba008d1366e5f8b03e9a8ed8bd4d7194a0",
+    "size": 11777
+   },
+   "JointDecisionv3.mlmodelc/weights/weight.bin": {
+    "sha256": "5f922e335bc57174645fd6ede581395f1ae846f7227898301b5a1a7585f4ab45",
+    "size": 12642764
+   },
+   "Preprocessor.mlmodelc/analytics/coremldata.bin": {
+    "sha256": "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d",
+    "size": 243
+   },
+   "Preprocessor.mlmodelc/coremldata.bin": {
+    "sha256": "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d",
+    "size": 486
+   },
+   "Preprocessor.mlmodelc/metadata.json": {
+    "sha256": "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf",
+    "size": 2841
+   },
+   "Preprocessor.mlmodelc/model.mil": {
+    "sha256": "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93",
+    "size": 28181
+   },
+   "Preprocessor.mlmodelc/weights/weight.bin": {
+    "sha256": "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea",
+    "size": 491072
+   },
+   "parakeet_vocab.json": {
+    "sha256": "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735",
+    "size": 151122
+   }
+  },
+  "license_tag": "cc-by-4.0",
+  "repo": "FluidInference/phonon-2-coreml",
+  "revision": "1702fc22e76f203d5ca464cd5d3ef130a45ce2c0",
+  "subfolder": ""
+ }
+}

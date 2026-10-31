@@ -1,0 +1,22 @@
+{
+  "images": [
+    {
+      "filename": "logo-conway-light.png",
+      "idiom": "universal"
+    },
+    {
+      "filename": "logo-conway-dark.png",
+      "idiom": "universal",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ]
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

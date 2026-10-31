@@ -1,0 +1,4 @@
+{"labels": ["O", "R", "F", "E", "D"], "thresholds": {"clean": 0.99, "polished": 0.99},
+ "base": "google/electra-small-discriminator@fa8239aadc095e9164941d05878b98afe9b953c3 (licence on card at pin: apache-2.0)",
+ "train": "DisfluencySpeech train 4,500 (amaai-lab/DisfluencySpeech@b7da294f, apache-2.0) + Disfl-QA train 7,182 (google-research-datasets/disfl_qa@1c997655, CC BY 4.0)",
+ "weights_sha256": "cd133149df827c817f7beed0c9047dc540a4d73a874db15df724b2bc1310c2b4"}

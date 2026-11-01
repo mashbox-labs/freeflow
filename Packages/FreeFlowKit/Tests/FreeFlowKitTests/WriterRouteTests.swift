@@ -54,12 +54,14 @@ final class WriterRouteTests: XCTestCase {
     }
 
 
-    /// Build 18 (2026-10-30): Apple Intelligence, on unless turned off; where it can't run the line says why.
+    /// Build 18 (2026-10-30): Apple Intelligence, optional; where it can't run the line says why.
+    /// Build 33: off unless turned on; a stored choice is kept.
     func testWriterChoice() {
-        XCTAssertEqual(WriterChoice.resolved(raw: nil), .apple)
-        XCTAssertEqual(WriterChoice.resolved(raw: ""), .apple)
-        XCTAssertEqual(WriterChoice.resolved(raw: "lfm3"), .apple, "an old LFM3 pick reads as not picked")
+        XCTAssertEqual(WriterChoice.resolved(raw: nil), .off, "a new install starts with cleanup off")
+        XCTAssertEqual(WriterChoice.resolved(raw: ""), .off)
+        XCTAssertEqual(WriterChoice.resolved(raw: "lfm3"), .off, "an old LFM3 pick reads as not picked")
         XCTAssertEqual(WriterChoice.resolved(raw: "off"), .off)
+        XCTAssertEqual(WriterChoice.resolved(raw: "apple"), .apple, "someone who turned it on keeps it on")
         XCTAssertEqual(WriterChoice.allCases, [.apple, .off])
         XCTAssertEqual(WriterChoice.status(choice: .apple, appleAvailable: true).state, "On, on this device")
         XCTAssertEqual(WriterChoice.status(choice: .apple, appleAvailable: false, reason: "Apple Intelligence is off in Settings").state,
@@ -88,5 +90,19 @@ final class WriterRouteTests: XCTestCase {
         let off = WritingReadout(model: "None", runtime: "raw text", background: false, wordsIn: 3, wordsOut: 3, seconds: 0,
                                  note: "writing is off")
         XCTAssertEqual(off.short, "As heard · writing is off")
+    }
+
+    /// Build 33: the default changes only where nothing is stored; a stored choice, on or off, is kept as it is.
+    func testDefaultOffKeepsAStoredChoice() {
+        let saved = UserDefaults.standard.string(forKey: WriterChoice.key)
+        defer { UserDefaults.standard.set(saved, forKey: WriterChoice.key) }
+        UserDefaults.standard.removeObject(forKey: WriterChoice.key)
+        XCTAssertNil(WriterChoice.stored)
+        XCTAssertEqual(WriterChoice.resolved, .off)
+        WriterChoice.stored = .apple
+        XCTAssertEqual(WriterChoice.resolved, .apple)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: WriterChoice.key), "apple", "nothing overwrites it")
+        WriterChoice.stored = .off
+        XCTAssertEqual(WriterChoice.resolved, .off)
     }
 }

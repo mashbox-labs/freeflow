@@ -9,8 +9,11 @@ import FreeFlowKit   // the plug-in compiles FnGesture.swift into itself instead
 /// needs Accessibility, the same permission that lets Free Flow paste into other apps, so one switch covers both.
 /// It sees fn (flagsChanged, key code 63) and key downs; it keeps a key from the app in front only when FnGesture says
 /// the key is Free Flow's (fn+Space for hands-free, Esc while recording). fn itself always goes through.
-@MainActor
-final class FnKeyMonitor {
+/// Build 26: not @MainActor, and nothing on the tap path asks Swift which actor it is on. Build 26.1 (Xcode 27.2) crashed
+/// with EXC_BAD_ACCESS inside MainActor.assumeIsolated in the tap callback (Free Flow-2026-11-01-055008.ips, main
+/// thread). The tap's run loop source and the retry timer are on the main run loop, and start/stop are called on the
+/// main thread, so every member is touched on the main thread only.
+final class FnKeyMonitor: @unchecked Sendable {
     /// fn went down (true) or up (false); the Bool after it: Command, Control, Option or Shift were held too.
     var onFn: ((Bool, Bool) -> Void)?
     /// A key went down; return true to keep it from the app in front.
@@ -19,6 +22,8 @@ final class FnKeyMonitor {
     private var source: CFRunLoopSource?
     private var retry: Timer?
     private var fnHeld = false
+    /// Build 26: ms from the key's own timestamp to this tap seeing it (a busy main thread shows here), for FFSTART.
+    private(set) var lastFnLagMs: Double = 0
 
     var running: Bool { tap != nil }
 
@@ -28,10 +33,8 @@ final class FnKeyMonitor {
         if AXIsProcessTrusted(), install() { retry?.invalidate(); retry = nil; return }
         guard retry == nil else { return }
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.tap == nil else { return }
-                if AXIsProcessTrusted(), self.install() { self.retry?.invalidate(); self.retry = nil }
-            }
+            guard let self, self.tap == nil else { return }
+            if AXIsProcessTrusted(), self.install() { self.retry?.invalidate(); self.retry = nil }
         }
         RunLoop.main.add(timer, forMode: .common)
         retry = timer
@@ -57,6 +60,15 @@ final class FnKeyMonitor {
         return true
     }
 
+    /// An event's timestamp is mach_absolute_time ticks on this clock; ms from it to now (nil-safe: 0 when unreadable).
+    private static func lagMs(_ stamp: CGEventTimestamp) -> Double {
+        var tb = mach_timebase_info_data_t()
+        mach_timebase_info(&tb)
+        let now = mach_absolute_time()
+        guard stamp > 0, stamp <= now, tb.denom > 0 else { return 0 }
+        return Double(now - stamp) * Double(tb.numer) / Double(tb.denom) / 1_000_000
+    }
+
     /// true = keep the event from the app in front.
     fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
         switch type {
@@ -68,6 +80,7 @@ final class FnKeyMonitor {
             let down = event.flags.contains(.maskSecondaryFn)
             guard down != fnHeld else { return false }
             fnHeld = down
+            lastFnLagMs = Self.lagMs(event.timestamp)
             let others = event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
             onFn?(down, !others.isEmpty)
             return false
@@ -89,7 +102,9 @@ private func fnTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGE
                            refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let refcon else { return Unmanaged.passUnretained(event) }
     let monitor = Unmanaged<FnKeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
-    // The tap's run loop source is on the main run loop, so this runs on the main thread.
-    let keep = MainActor.assumeIsolated { monitor.handle(type, event) }
+    // The tap's run loop source is on the main run loop, so this runs on the main thread; build 26: no actor check here
+    // (see the class note). Anywhere else the event passes through untouched.
+    guard Thread.isMainThread else { return Unmanaged.passUnretained(event) }
+    let keep = monitor.handle(type, event)
     return keep ? nil : Unmanaged.passUnretained(event)
 }

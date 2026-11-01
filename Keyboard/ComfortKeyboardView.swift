@@ -399,10 +399,15 @@ struct ListeningKeyboard: View {
         GeometryReader { geo in
             let keys = ComfortMetrics.keys(kind: model.layout, size: geo.size, scale: scale, globe: showsGlobe, hand: model.hand)
             let dictate = keys.first { $0.id == "mic" }?.visible ?? .zero
-            let busy = model.mode == .writing
+            // Build 26: .starting is the moment between the keyboard's ask after a trip and the app recording (the
+            // pre-roll keeps what is said in it); "Listening, speak now" only once the app really records.
+            let starting = model.mode == .starting
+            let busy = model.mode == .writing || starting
+            let title = starting ? ColdStart.Words.keyboardStarting
+                : (busy ? model.stage : (model.afterTrip ? ColdStart.Words.keyboardLive : "Listening"))
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 8) {
-                    ListeningPanel(levels: model.levels, title: busy ? model.stage : "Listening", subtitle: model.inputName, busy: busy,
+                    ListeningPanel(levels: model.levels, title: title, subtitle: model.inputName, busy: busy,
                                    idPrefix: "kb.", finishInline: false, cancelTrailing: model.hand == .left,
                                    onCancel: { model.cancel() }, onFinish: { model.finish() })
                         .padding(.horizontal, 3).padding(.top, 3)

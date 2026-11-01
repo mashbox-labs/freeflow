@@ -1,5 +1,10 @@
+import Combine
 import FreeFlowKit
+import StoreKit
 import SwiftUI
+#if !targetEnvironment(macCatalyst)
+import AVFAudio
+#endif
 
 struct SettingsView: View {
     @AppStorage("sessionMinutes") private var sessionMinutes = 15
@@ -89,6 +94,7 @@ struct SettingsView: View {
                 Picker("Keep the mic ready for", selection: $sessionMinutes) {
                     Text("5 minutes").tag(5); Text("15 minutes").tag(15); Text("1 hour").tag(60)
                 }
+                MicPicker()
                 Toggle("Keep videos and music playing", isOn: $mixWithOthers)
                 Toggle("Lower other audio while I talk", isOn: $duckOthers).disabled(!mixWithOthers)
                 if let at = SharedSession.lastEndAt, !SharedSession.lastEnd.isEmpty {
@@ -104,7 +110,7 @@ struct SettingsView: View {
                 Label("Keyboard mic key", systemImage: "keyboard").badge("On")
                 Toggle("Two-finger swipe on the keyboard", isOn: $gestures)
                     .onChange(of: gestures) { _, v in SharedSession.keyboardGestures = v }
-                NavigationLink("Action Button, Back Tap, Control Center, Siri") { TriggersView() }
+                NavigationLink("Action Button and Control Center") { TriggersView() }
             }
             .listRowSeparator(.hidden)
             .listSectionSeparator(.hidden)
@@ -169,6 +175,7 @@ struct SettingsView: View {
             .listRowSeparator(.hidden)
             .listSectionSeparator(.hidden)
             footer("Stats keep counts and times only, never your words or audio. They are worked out on this device and never sent. A recording that didn't finish (a call, an X tap, Free Flow closing) stays on this device for Retry until you delete it or it reaches this age; Never keeps it until you delete it. Delete them all in Privacy.")
+            TestBuildSection()
             Section("MASHBOX Labs") {
                 NavigationLink("About and credits") { AboutView() }
                 Button("Show setup again") { onboarded = false }
@@ -304,14 +311,12 @@ struct TriggersView: View {
             step("Action Button", "iPhone 15 Pro and later: Settings > Action Button, swipe to Controls, tap Choose a Control, search Free Flow, pick Start/Stop Free Flow.")
             step("Control Center", "Swipe down from the top right, tap + (top left), Add a Control, search Free Flow, pick Start/Stop Free Flow.")
             step("Lock Screen", "Touch and hold the Lock Screen, tap Customize, then Lock Screen. Tap the minus on a bottom button, tap the empty spot, search Free Flow, pick Start/Stop Free Flow.")
-            step("Back Tap", "In Shortcuts, tap +, Add Action, search Free Flow, pick Start/Stop Free Flow, save. Then Settings > Accessibility > Touch > Back Tap > Double Tap > your shortcut. iPhone only.")
-            step("Siri", "Say \"Start Free Flow\", then \"Stop Free Flow\".")
             step("The first press", "If Free Flow's mic session is off, iOS only lets the microphone turn on in the app, so the first press opens Free Flow and starts listening there. Go back to what you were doing. While the session stays on, presses work without leaving your app.")
-            step("Keep the keyboard ready", "\"Start Free Flow session\" turns the mic session on without opening the app, so the keyboard never has to switch apps.")
+            step("Live Activities", "Leave Live Activities on for Free Flow (Settings > Free Flow). iOS lets a press listen only while Free Flow's Live Activity shows; with them off, the press says so and turns the mic off.")
             Button("Turn on the Copied notice") { NoticePoster.requestPermission() }
                 .font(FFFont.text(16, .bold)).tint(Palette.accentText)
                 .accessibilityIdentifier("noticeButton")
-            Text("iPad and Mac have no Action Button or Back Tap; use Control Center, Siri or the keyboard.").font(FFFont.text(15)).foregroundStyle(Palette.faint)
+            Text("iPad and Mac have no Action Button; use Control Center or the keyboard.").font(FFFont.text(15)).foregroundStyle(Palette.faint)
         }
         .navigationTitle("Ways to start")
     }
@@ -427,5 +432,121 @@ struct KeyLayoutDetail: View {
         .background(Palette.bg)
         .navigationTitle("Keyboard layout")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+#if !targetEnvironment(macCatalyst)
+/// Build 26 (MicChoice): which microphone Free Flow records from. Built-in by default; any input iOS
+/// offers can be picked, a Bluetooth headset mic included, and the note under it says what that costs.
+struct MicPicker: View {
+    @AppStorage(MicChoice.key) private var micInput = ""
+    @AppStorage(MicChoice.nameKey) private var micName = ""
+    @AppStorage(MicChoice.bluetoothKey) private var micBluetooth = false
+    @State private var available: [MicChoice.Input] = []
+
+    var body: some View {
+        Picker("Microphone", selection: $micInput) {
+            ForEach(MicChoice.rows(available: available, saved: micInput, savedName: micName), id: \.tag) { row in
+                Text(row.title).tag(row.tag)
+            }
+        }
+        .accessibilityIdentifier("settings.mic")
+        .onChange(of: micInput) { _, uid in
+            if uid.isEmpty { micName = ""; micBluetooth = false }
+            else if let input = available.first(where: { $0.uid == uid }) { micName = input.name; micBluetooth = input.isBluetooth }
+        }
+        .task { refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in refresh() }
+        Text(MicChoice.note)
+            .font(FFFont.text(13)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("settings.micNote")
+    }
+
+    /// A Bluetooth headset mic is listed only by a session that allows hands-free. With the mic off, the category is set
+    /// that way (not activated: nothing plays or records) just to list it; with the mic on, the live route is never touched.
+    private func refresh() {
+        let session = AVAudioSession.sharedInstance()
+        if !DictationEngine.shared.sessionLive {
+            try? session.ffSetPlayAndRecord(mixWithOthers: true, duckOthers: false, bluetoothMic: true)
+        }
+        let now = (session.availableInputs ?? []).map(DictationEngine.micInput)
+        if now != available { available = now }
+    }
+}
+#endif
+
+/// Build 28: Settings > Test build, shown only in TestFlight and Xcode builds (StoreKit's AppTransaction
+/// environment), never in the App Store build. Export diagnostics shares WriteDiagnostics (counts and times of the
+/// writing step from the app and the keyboard; never words or audio).
+struct TestBuildSection: View {
+    @State private var shown = false
+    @State private var keyboardWrites = KeyboardWriting.enabled
+    @AppStorage("bgprobe.armed") private var probeArmed = false
+
+    var body: some View {
+        Group {
+            if shown {
+                Section("Test build") {
+                    Toggle("Write keyboard dictations in the keyboard", isOn: $keyboardWrites)
+                        .onChange(of: keyboardWrites) { _, on in KeyboardWriting.enabled = on }
+                    Toggle("Background Apple test (next time Free Flow is in the background)", isOn: $probeArmed)
+                    ShareLink(item: DiagnosticsFile(), preview: SharePreview("Free Flow diagnostics")) {
+                        Text("Export diagnostics")
+                    }
+                    Button("Clear diagnostics", role: .destructive) { WriteDiagnostics.clear() }
+                }
+                .listRowSeparator(.hidden)
+                .listSectionSeparator(.hidden)
+                Section { EmptyView() } footer: {
+                    Text("Test builds only. Diagnostics hold counts and times of the writing step from the app and the keyboard, never your words or audio. The background test calls Apple Intelligence on a fixed sample sentence while Free Flow is in the background; start a session first.")
+                        .font(FFFont.text(14))
+                }.listSectionSeparator(.hidden)
+            }
+        }
+        .task { shown = await TestBuild.isTestBuild() }
+    }
+}
+
+/// TestFlight or Xcode, never the App Store build. Build 28 on an iPad (TestFlight) did not show the section with
+/// only a verified AppTransaction check, so: the receipt's file name first ("sandboxReceipt" on TestFlight installs, a
+/// synchronous check that needs no network), then AppTransaction's environment, verified or not (only the environment
+/// is read; any failure there means "not shown" unless the receipt already said test build).
+enum TestBuild {
+    static var receiptSaysTest: Bool {
+        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+    }
+
+    static func isTestBuild() async -> Bool {
+        #if DEBUG
+        return true
+        #else
+        if receiptSaysTest { return true }
+        do {
+            let result = try await AppTransaction.shared
+            let t: AppTransaction
+            switch result {
+            case .verified(let v): t = v
+            case .unverified(let v, _): t = v
+            }
+            return t.environment == .sandbox || t.environment == .xcode
+        } catch {
+            return false
+        }
+        #endif
+    }
+}
+
+/// The diagnostics file, written when it is shared.
+struct DiagnosticsFile: Transferable {
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .plainText) { _ in
+            let info = Bundle.main.infoDictionary ?? [:]
+            var sys = utsname(); uname(&sys)
+            let machine = withUnsafeBytes(of: &sys.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            let header = "Free Flow \(info["CFBundleShortVersionString"] ?? "") (\(info["CFBundleVersion"] ?? "")) · \(machine) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion) · exported \(ISO8601DateFormatter().string(from: Date()))"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("freeflow-diagnostics.txt")
+            try WriteDiagnostics.export(header: header).write(to: url, atomically: true, encoding: .utf8)
+            return SentTransferredFile(url)
+        }
     }
 }

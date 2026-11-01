@@ -26,6 +26,10 @@ public struct ToggleDictationIntent: AudioRecordingIntent {
 
     @available(iOS 26.0, *)
     public static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
+    /// Build 32 (device test of build 31): the Control (Control Center, Lock Screen, Action Button > Controls)
+    /// works; run as a Shortcuts-app action it did not. Not listed in the Shortcuts app, Siri or Spotlight; the
+    /// Control still runs it.
+    public static let isDiscoverable = false
 
     public init() {}
 
@@ -49,6 +53,8 @@ public struct FinishDictationIntent: LiveActivityIntent {
     public static let title: LocalizedStringResource = "Stop Free Flow"
     public static let description = IntentDescription("Finish the dictation in progress, or turn the microphone off.")
     public static let openAppWhenRun = false
+    /// Build 31: only the Live Activity's Stop button runs it; not listed in Shortcuts, Siri or the Action button.
+    public static let isDiscoverable = false
     public init() {}
 
     @MainActor
@@ -59,10 +65,13 @@ public struct FinishDictationIntent: LiveActivityIntent {
 }
 
 /// Turn the microphone session on so the keyboard can dictate without opening the app.
+/// Build 31: no longer offered anywhere (Start/Stop is the one action); kept so a shortcut someone already
+/// made still runs. The in-app session is unchanged.
 public struct StartSessionIntent: AudioRecordingIntent {
     public static let title: LocalizedStringResource = "Start Free Flow session"
     public static let description = IntentDescription("Keep the microphone ready so the Free Flow keyboard can dictate without switching apps.")
     public static let openAppWhenRun = false
+    public static let isDiscoverable = false
     public init() {}
 
     @MainActor

@@ -1,20 +1,37 @@
 import FreeFlowKit
 import XCTest
 
-/// Build 23 (F2): the Mac's mic after a fn dictation. Off right after by default; the window choices stay as they were.
+/// Build 26: the Mac's mic is the built-in one by default and stays ready while Free Flow runs.
 final class MacMicTests: XCTestCase {
-    func testDefaultReleasesRightAfter() {
-        XCTAssertEqual(MacMic.minutes(stored: nil), 0)
-        XCTAssertTrue(MacMic.releasesAfterDictation(stored: nil))
+    func testDefaultKeepsTheMicReadyAlways() {
+        XCTAssertEqual(MacMic.minutes(stored: nil), MacMic.always)
+        XCTAssertFalse(MacMic.releasesAfterDictation(stored: nil))
         XCTAssertTrue(MacMic.releasesAfterDictation(stored: 0))
     }
 
-    func testChoicesKeepTheMicOn() {
-        for m in [5, 15, 60] {
+    func testChoices() {
+        for m in [15, 5, 2] {
             XCTAssertEqual(MacMic.minutes(stored: m), m)
             XCTAssertFalse(MacMic.releasesAfterDictation(stored: m))
         }
-        XCTAssertEqual(MacMic.minutes(stored: 480), 0, "an unknown value is the default")
-        XCTAssertEqual(MacMic.choices.map(MacMic.label), ["Off right after each dictation", "5 minutes", "15 minutes", "1 hour"])
+        XCTAssertEqual(MacMic.minutes(stored: 60), MacMic.always, "build 23's 1 hour is no longer a choice: the default")
+        XCTAssertEqual(MacMic.choices.map(MacMic.label),
+                       ["Always (while Free Flow runs)", "15 minutes", "5 minutes", "2 minutes", "Off right after each dictation"])
+    }
+
+    func testPickedDefaultsToBuiltIn() {
+        XCTAssertEqual(MacMic.picked(stored: nil), MacMic.builtIn)
+        XCTAssertEqual(MacMic.picked(stored: ""), MacMic.builtIn)
+        XCTAssertEqual(MacMic.picked(stored: "usb-uid"), "usb-uid")
+    }
+
+    func testOwnInput() {
+        let all = ["BuiltInMicrophoneDevice", "headset-uid", "usb-uid"]
+        XCTAssertEqual(MacMic.ownInput(picked: MacMic.builtIn, connected: all, builtInUID: "BuiltInMicrophoneDevice"), "BuiltInMicrophoneDevice")
+        XCTAssertEqual(MacMic.ownInput(picked: MacMic.builtIn, connected: ["headset-uid"], builtInUID: nil), "", "lid closed: the default")
+        XCTAssertEqual(MacMic.ownInput(picked: MacMic.systemDefault, connected: all, builtInUID: "BuiltInMicrophoneDevice"), "")
+        XCTAssertEqual(MacMic.ownInput(picked: "headset-uid", connected: all, builtInUID: "BuiltInMicrophoneDevice"), "headset-uid")
+        XCTAssertEqual(MacMic.ownInput(picked: "usb-uid", connected: ["BuiltInMicrophoneDevice"], builtInUID: "BuiltInMicrophoneDevice"), "",
+                       "unplugged: the default records")
     }
 }

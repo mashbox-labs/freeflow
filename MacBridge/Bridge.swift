@@ -31,6 +31,14 @@ private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "freeflow.ma
     func inputName() -> String
     /// Opens a System Settings page: "accessibility", "microphone", "keyboard" or "sound".
     func openSettings(_ page: String)
+    /// Build 26: the input devices, one "uid<TAB>name<TAB>kind" each (kind: builtin, bluetooth, usb, other); the
+    /// default input's uid. A change in the list comes as the event "devices".
+    func inputDevices() -> [String]
+    func defaultInputUID() -> String
+    /// Build 26: records from the input with this uid (a mic picked in Settings) until stopInput; "" when it started,
+    /// else why not. onAudio: mono Float32 samples, their count and rate, on the audio thread.
+    func startInput(_ uid: String, _ onAudio: @escaping (UnsafePointer<Float>, Int, Double) -> Void) -> String
+    func stopInput()
     #if DEBUG || FF_TESTS
     /// Test builds only (security). The mic test (--mictest --switch): moves the default input to the built-in mic,
     /// or from it to a Bluetooth or USB input (never an iPhone's); returns the new device's name, or "" when there is none.
@@ -60,21 +68,27 @@ public final class FFMacBridgeMain: NSObject, FFMacBridging {
 
     public func start(_ onEvent: @escaping (String) -> Void) {
         self.onEvent = onEvent
+        // Build 26: the fn monitor and its closures are made outside MainActor.assumeIsolated, so the closures the tap
+        // calls carry no actor isolation and no runtime actor check (build 26.1's crash, FnKeyMonitor's note).
+        let m = FnKeyMonitor()
+        m.onFn = { [weak self] down, others in
+            guard let self else { return }
+            let t = ProcessInfo.processInfo.systemUptime
+            // Build 26: a start carries when fn went down (the key's own time, on the systemUptime clock) for FFSTART.
+            self.apply(down ? self.gesture.fnPressed(at: t, otherModifiers: others) : self.gesture.fnReleased(at: t),
+                       at: t - (self.monitor?.lastFnLagMs ?? 0) / 1000, tap: t)
+        }
+        m.onKey = { [weak self] key in
+            guard let self else { return false }
+            let r = self.gesture.keyPressed(key, at: ProcessInfo.processInfo.systemUptime)
+            let now = ProcessInfo.processInfo.systemUptime
+            self.apply(r.action, at: now, tap: now)
+            return r.swallow
+        }
+        m.start()
+        monitor = m
+        watchDevices()
         MainActor.assumeIsolated {
-            let m = FnKeyMonitor()
-            m.onFn = { [weak self] down, others in
-                guard let self else { return }
-                let t = ProcessInfo.processInfo.systemUptime
-                self.apply(down ? self.gesture.fnPressed(at: t, otherModifiers: others) : self.gesture.fnReleased(at: t))
-            }
-            m.onKey = { [weak self] key in
-                guard let self else { return false }
-                let r = self.gesture.keyPressed(key, at: ProcessInfo.processInfo.systemUptime)
-                self.apply(r.action)
-                return r.swallow
-            }
-            m.start()
-            monitor = m
             let panel = PillPanel()
             panel.onStop = { [weak self] in self?.send("stop") }
             panel.onCancel = { [weak self] in self?.send("cancel") }
@@ -83,11 +97,11 @@ public final class FFMacBridgeMain: NSObject, FFMacBridging {
         log.log("bridge started, accessibility=\(AXIsProcessTrusted(), privacy: .public)")
     }
 
-    private func apply(_ action: FnGesture.Action) {
+    private func apply(_ action: FnGesture.Action, at t: Double, tap: Double) {
         switch action {
         case .none: break
-        case .start: send("start")
-        case .startHandsFree: send("startHandsFree")
+        case .start: send("start@\(t)@\(tap)")
+        case .startHandsFree: send("startHandsFree@\(t)@\(tap)")
         case .becomeHandsFree: send("becomeHandsFree")
         case .stopAndInsert: send("stop")
         case .cancel: send("cancel")
@@ -158,6 +172,39 @@ public final class FFMacBridgeMain: NSObject, FFMacBridging {
     }
 
     public func inputName() -> String { AudioDevices.name(AudioDevices.defaultInput()) }
+
+    private let inputMic = InputMic()
+    private var devicesWatched = false
+
+    public func inputDevices() -> [String] {
+        // The audio session's own private aggregates (CADefaultDeviceAggregate-<pid>-<n>) are not mics to pick.
+        AudioDevices.inputs().filter { !AudioDevices.uid($0).hasPrefix("CADefaultDeviceAggregate") }
+            .map { "\(AudioDevices.uid($0))\t\(AudioDevices.name($0))\t\(AudioDevices.kind($0))" }
+    }
+
+    public func defaultInputUID() -> String { AudioDevices.uid(AudioDevices.defaultInput()) }
+
+    public func startInput(_ uid: String, _ onAudio: @escaping (UnsafePointer<Float>, Int, Double) -> Void) -> String {
+        inputMic.start(uid: uid, onAudio)
+    }
+
+    public func stopInput() { inputMic.stop() }
+
+    /// Devices added or removed, or a new default input: the app refreshes its picker.
+    private func watchDevices() {
+        guard !devicesWatched else { return }
+        devicesWatched = true
+        for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
+            var a = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, DispatchQueue.main) { [weak self] _, _ in
+                self?.send("devices")
+            }
+        }
+        // After sleep an input unit kept open may be stale: the app reopens it at the next press.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.send("wake")
+        }
+    }
 
     #if DEBUG || FF_TESTS
     public func switchInput() -> String {

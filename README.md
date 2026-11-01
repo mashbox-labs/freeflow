@@ -4,7 +4,7 @@ Free Flow by MASHBOX Labs is free, on-device voice dictation for iPhone, iPad an
 
 Hold a key and talk. When you let go, your words go in where your cursor is. Speech recognition and text cleanup run on your device. 100% private: nothing you say leaves your device.
 
-- iPhone and iPad: a keyboard extension with a mic key, plus Control Center, Lock Screen, Siri and Shortcuts actions. iOS 18 and iPadOS 18 or later.
+- iPhone and iPad: a keyboard extension with a mic key, plus a Start/Stop control for Control Center, the Lock Screen and the Action Button. iOS 18 and iPadOS 18 or later.
 - Mac: hold fn in any app and talk. Press fn twice for hands-free, Esc to cancel. A menu bar item and a small pill show the state. macOS 15 or later, Apple silicon.
 - One dictionary for names and words spelled your way, and a history of what you dictated.
 - Writing styles (formal, casual, very casual) when Apple Intelligence is on; otherwise the text goes in as heard.
@@ -78,7 +78,7 @@ Free Flow downloads the model you pick from Hugging Face and checks it against t
 
 The notice files that ship with the Bark models are in `ThirdParty/Models`. The catalog itself is `Packages/FreeFlowKit/Sources/FreeFlowKit/Resources/speech-models.json`; the app, the setup picker and Settings > Models render whatever is listed there.
 
-Text cleanup uses Apple Intelligence (Apple's on-device model through FoundationModels) when it is available and turned on; otherwise the recognizer's text goes in as heard. The disfluency tagger in `Packages/FreeFlowTagger` is a small Core ML token classifier that runs on the device.
+Text cleanup uses Apple Intelligence (Apple's on-device model through FoundationModels) when it is available and turned on (it is off until you turn it on); otherwise the recognizer's text goes in as heard. The disfluency tagger in `Packages/FreeFlowTagger` is a small Core ML token classifier that runs on the device.
 
 ## Privacy
 

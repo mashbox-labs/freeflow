@@ -64,13 +64,4 @@ struct AppIntentsPackageList: AppIntentsPackage {
 
 import AppIntents
 
-struct FreeFlowShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(intent: ToggleDictationIntent(),
-                    phrases: ["Start \(.applicationName)", "Stop \(.applicationName)", "Dictate with \(.applicationName)"],
-                    shortTitle: "Start/Stop", systemImageName: "mic.fill")
-        AppShortcut(intent: StartSessionIntent(),
-                    phrases: ["Start a \(.applicationName) session"],
-                    shortTitle: "Start session", systemImageName: "waveform")
-    }
-}
+// Build 32: no App Shortcut and no Siri phrase. Start/Stop Free Flow runs only from its Control.

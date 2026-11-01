@@ -291,7 +291,7 @@ final class FreeFlowUITests: XCTestCase {
         launch(onboarded: true)
         startWarmSession()
         tab("Settings")
-        let link = app.buttons["Action Button, Back Tap, Control Center, Siri"]
+        let link = app.buttons["Action Button and Control Center"]
         scrollTo(link)
         link.tap()
         let notice = element("noticeButton")
@@ -408,25 +408,324 @@ final class FreeFlowUITests: XCTestCase {
         XCTAssertTrue(text.label.lowercased().contains("country"), text.label)
     }
 
-    /// Sim vs code split: the session control shipped since build 1 (StartSessionIntent, unchanged), pressed the same way.
-    func test6dSessionControl() {
+    /// Build 31: ONE action. The Control Center gallery offers Start/Stop Free Flow and no session control.
+    func test6dOneControlOnly() {
         launch(onboarded: true)
-        let session = app.buttons["sessionButton"]
-        scrollTo(session)
-        if session.label != "Start session" { session.tap(); sleep(2) }
-        XCTAssertEqual(session.label, "Start session")
         XCUIDevice.shared.press(.home)
         sleep(2)
-        let control = openControlCenter(kind: "freeflow.control.session", tile: "Free Flow session")
-        sleep(3)
-        control.tap()
-        sleep(5)
-        shot("t12-session-control")
-        closeControlCenter()
+        _ = openControlCenter()   // adds Start/Stop if missing, the way a person does
+        let sb = springboard
+        sb.buttons["Add Controls"].tap(); sleep(2)
+        sb.buttons["Add a Control"].tap(); sleep(2)
+        let search = sb.searchFields["Search Controls"]
+        search.tap(); search.typeText("Free Flow"); sleep(3)
+        let tiles = sb.icons.matching(NSPredicate(format: "label CONTAINS 'Free Flow'")).allElementsBoundByIndex.map(\.label)
+        shot("t12-gallery-free-flow")
+        print("FFINTENT control gallery: " + tiles.joined(separator: " | "))
+        XCUIDevice.shared.press(.home); sleep(1)
+        XCUIDevice.shared.press(.home); sleep(1)
+        XCTAssertFalse(tiles.contains("Free Flow session"), "the session control is still offered")
+        XCTAssertTrue(tiles.contains("Start/Stop Free Flow"), "Start/Stop Free Flow is not offered")
+    }
+
+    // MARK: Shortcuts and the Live Activity rule (build 31: a build 30 crash, iOS 27.2)
+    // iOS ends the app (AppIntents PerformActionExecutorTask.verifySystemPolicy) when an AudioRecordingIntent returns
+    // with the mic on and no Live Activity. These press the real control with Live Activities off, warm and cold, then
+    // once more after, and check that Free Flow is still running.
+
+    private var settingsApp: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.Preferences") }
+
+    /// Settings > Apps > Free Flow > Live Activities, the way a person turns it off or on.
+    private func setLiveActivities(_ on: Bool) {
+        let prefs = settingsApp
+        prefs.terminate()
+        prefs.launch()
+        let toggle = prefs.switches.matching(NSPredicate(format: "label CONTAINS[c] 'Live Activities'")).firstMatch
+        var found = false
+        let apps = prefs.staticTexts["Apps"].firstMatch
+        for _ in 0..<6 where !apps.isHittable { prefs.swipeUp() }
+        if apps.exists {
+            apps.tap(); sleep(2)
+            let ff = prefs.staticTexts["Free Flow"].firstMatch
+            for _ in 0..<12 where !(ff.exists && ff.isHittable) { prefs.swipeUp() }
+            if ff.exists { ff.tap(); sleep(2); found = toggle.waitForExistence(timeout: 5) }
+        }
+        if !found {
+            print("FFINTENT settings tree: " + String(prefs.debugDescription.suffix(5000)))
+            XCTFail("Settings > Apps > Free Flow > Live Activities not found"); return
+        }
+        for _ in 0..<12 where !toggle.isHittable { prefs.swipeUp() }
+        let isOn = (toggle.value as? String) == "1"
+        if isOn != on { toggle.switches.firstMatch.exists ? toggle.switches.firstMatch.tap() : toggle.tap(); sleep(1) }
+        let now = (toggle.value as? String) == "1"
+        print("FFINTENT live activities \(isOn ? "on" : "off") -> \(now ? "on" : "off")")
+        XCTAssertEqual(now, on, "could not turn Live Activities \(on ? "on" : "off")")
+        XCUIDevice.shared.press(.home); sleep(1)
+    }
+
+    private func stateName(_ s: XCUIApplication.State) -> String {
+        switch s {
+        case .notRunning: return "notRunning"
+        case .runningBackground, .runningBackgroundSuspended: return "background"
+        case .runningForeground: return "foreground"
+        default: return "unknown"
+        }
+    }
+
+    /// Warm session (as the keyboard leaves it), then Live Activities off, then the control. Build 30 dies here.
+    func test7aLiveActivitiesOffWarm() {
+        launch(onboarded: true)
+        addTeardownBlock { [unowned self] in self.setLiveActivities(true) }
+        startWarmSession()
+        XCTAssertNotEqual(app.buttons["sessionButton"].label, "Start session", "the warm session did not start")
+        XCUIDevice.shared.press(.home); sleep(2)
+        setLiveActivities(false)
+        pressControl("p1-off-warm-press")
+        sleep(4)
+        let first = stateName(app.state)
+        print("FFINTENT 7a warm press with Live Activities off: app=" + first)
+        pressControl("p2-off-warm-press-again")
+        sleep(4)
+        let second = stateName(app.state)
+        print("FFINTENT 7a second press: app=" + second)
+        XCTAssertNotEqual(first, "notRunning", "Free Flow ended on the press (the build 30 crash)")
+        XCTAssertNotEqual(second, "notRunning", "Free Flow ended on the second press")
         bringForward()
+        let session = app.buttons["sessionButton"]
         scrollTo(session)
-        print("FFTRIGGER session control: " + session.label)
-        XCTAssertNotEqual(session.label, "Start session", "the shipped session control did not start a session")
+        print("FFINTENT 7a session after: " + session.label)
+        XCTAssertFalse(element("finishButton").exists, "Free Flow is listening with no Live Activity")
+    }
+
+    /// Free Flow not running, Live Activities off, then the control (it opens Free Flow). Build 30 dies here.
+    func test7bLiveActivitiesOffCold() {
+        launch(onboarded: true)
+        addTeardownBlock { [unowned self] in self.setLiveActivities(true) }
+        app.terminate()
+        setLiveActivities(false)
+        pressControl("p3-off-cold-press")
+        _ = app.wait(for: .runningForeground, timeout: 15)
+        sleep(5)
+        let state = stateName(app.state)
+        print("FFINTENT 7b cold press with Live Activities off: app=" + state)
+        shot("p4-off-cold-after")
+        XCTAssertNotEqual(state, "notRunning", "Free Flow ended on the cold press (the build 30 crash)")
+        XCTAssertFalse(element("finishButton").exists, "Free Flow is listening with no Live Activity")
+    }
+
+    /// Live Activities back on after 7a/7b: warm press starts and stops as in build 25, from the background, copied.
+    func test7cOnAgainWarmStartStop() {
+        setLiveActivities(true)
+        launch(onboarded: true)
+        startWarmSession()
+        XCUIDevice.shared.press(.home); sleep(2)
+        pressControl("p5-on-warm-start")
+        XCTAssertNotEqual(app.state, .notRunning, "Free Flow ended on the start press")
+        XCTAssertNotEqual(app.state, .runningForeground, "a warm press must not open the app")
+        sleep(12)
+        pressControl("p6-on-warm-stop")
+        XCTAssertNotEqual(app.state, .notRunning, "Free Flow ended on the stop press")
+        bringForward()
+        let text = element("transcriptText")
+        XCTAssertTrue(text.waitForExistence(timeout: 180))
+        print("FFINTENT 7c warm text: " + text.label)
+        XCTAssertTrue(text.label.lowercased().contains("country"), text.label)
+    }
+
+    /// The Live Activity's Stop button (FinishDictationIntent) on the Lock Screen finishes the dictation.
+    func test7dLiveActivityStop() {
+        setLiveActivities(true)
+        launch(onboarded: true)
+        startWarmSession()
+        XCUIDevice.shared.press(.home); sleep(2)
+        pressControl("p7-start-for-stop")
+        sleep(8)
+        XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
+        sleep(2)
+        XCUIDevice.shared.press(.home)   // wakes to the Lock Screen
+        sleep(2)
+        let stop = springboard.buttons["Stop"].firstMatch
+        let seen = stop.waitForExistence(timeout: 10)
+        shot("p8-lock-screen")
+        print("FFINTENT 7d Stop on Lock Screen: " + (seen ? "shown" : "not shown"))
+        if !seen { print("FFINTENT lock tree: " + String(springboard.debugDescription.suffix(4000))) }
+        XCTAssertTrue(seen, "no Stop button on the Lock Screen Live Activity")
+        stop.tap()
+        sleep(4)
+        XCTAssertNotEqual(app.state, .notRunning, "Free Flow ended on Stop")
+        // Security (build 32): the locked screen shows the status, never the dictated words.
+        sleep(8)
+        let words = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'country'")).count
+        shot("p8b-lock-screen-after-stop")
+        print("FFINTENT 7d lock screen words after stop: \(words)")
+        XCTAssertEqual(words, 0, "the Lock Screen shows the dictated words")
+        XCUIDevice.shared.press(.home); sleep(1)
+        springboard.swipeUp(); sleep(2)   // unlock (no passcode on the simulator)
+        bringForward()
+        let text = element("transcriptText")
+        XCTAssertTrue(text.waitForExistence(timeout: 180), "Stop did not finish the dictation")
+        print("FFINTENT 7d text: " + text.label)
+    }
+
+    /// Build 32: Start/Stop Free Flow runs only from its Control. In the Shortcuts app's action search,
+    /// "Free Flow" finds no Free Flow action, while the same search for "Notes" does find Notes' actions (the search works).
+    func test7eShortcutsAppHasNoFreeFlowAction() {
+        launch(onboarded: true)
+        app.terminate()
+        let sc = XCUIApplication(bundleIdentifier: "com.apple.shortcuts")
+        sc.terminate(); sc.launch(); sleep(3)
+        for b in ["Continue", "Not Now", "OK"] where sc.buttons[b].exists { sc.buttons[b].tap(); sleep(1) }
+        let add = sc.buttons.matching(NSPredicate(format: "label == 'Add' OR label == 'New Shortcut' OR label == 'Create Shortcut' OR identifier == 'Add'")).firstMatch
+        guard add.waitForExistence(timeout: 10) else {
+            print("FFINTENT shortcuts tree: " + String(sc.debugDescription.suffix(6000))); XCTFail("no + in the Shortcuts app"); return
+        }
+        add.tap(); sleep(3)
+        let search = sc.searchFields.firstMatch
+        guard search.waitForExistence(timeout: 10) else {
+            print("FFINTENT editor tree: " + String(sc.debugDescription.suffix(6000))); XCTFail("no action search field"); return
+        }
+        func results(_ q: String) -> [String] {
+            search.tap()
+            if let v = search.value as? String, !v.isEmpty, v != search.placeholderValue { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: v.count)) }
+            search.typeText(q); sleep(4)
+            return (sc.staticTexts.allElementsBoundByIndex + sc.buttons.allElementsBoundByIndex).map(\.label).filter { !$0.isEmpty }
+        }
+        let notes = results("Notes")
+        let ff = results("Free Flow")
+        shot("p9-shortcuts-search")
+        print("FFINTENT shortcuts search Notes: " + notes.prefix(15).joined(separator: " | "))
+        print("FFINTENT shortcuts search Free Flow: " + ff.prefix(25).joined(separator: " | "))
+        XCTAssertTrue(notes.contains { $0.localizedCaseInsensitiveContains("note") && $0 != "Notes" }, "the action search found nothing for Notes, so it proves nothing")
+        XCTAssertFalse(ff.contains { $0.contains("Start/Stop") || $0.contains("Stop Free Flow") || $0.contains("Free Flow session") }, "a Free Flow action is listed")
+        sc.terminate()
+    }
+
+    // MARK: Keyboardless shortcut probes (measure only, nothing asserted about the outcome)
+
+    private func focusState(_ host: XCUIApplication, _ field: XCUIElement) -> String {
+        let focus = (field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
+        return "focus=\(focus) ffKeyboard=\(host.buttons["kb.mic"].exists || host.buttons["kb.finishButton"].exists) anyKeyboard=\(host.keyboards.count > 0 || host.buttons["kb.hide"].exists) value='\((field.value as? String) ?? "")'"
+    }
+
+    private func contactsSearch() -> (XCUIApplication, XCUIElement) {
+        let host = XCUIApplication(bundleIdentifier: "com.apple.MobileAddressBook")
+        host.terminate(); host.launch()
+        let search = host.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 15), "Contacts has no search field")
+        return (host, search)
+    }
+
+    /// Q1+Q2: keyboard dictation, then the Hide key mid-dictation; finished by the control; then the field again.
+    func test8aHideMidDictation() {
+        launch(onboarded: true)
+        startWarmSession()
+        XCUIDevice.shared.press(.home); sleep(2)
+        let (host, search) = contactsSearch()
+        XCTAssertTrue(showFreeFlowKeyboard(in: host, tapping: search), "Free Flow keyboard did not appear")
+        host.buttons["kb.mic"].tap()
+        XCTAssertTrue(host.buttons["kb.finishButton"].waitForExistence(timeout: 15), "the keyboard did not start listening")
+        sleep(3)
+        host.buttons["kb.hide"].firstMatch.tap(); sleep(2)
+        print("FFPROBE 8a after Hide while listening: " + focusState(host, search))
+        shot("k1-hidden-listening")
+        sleep(8)
+        pressControl("k2-control-stop")
+        host.activate(); sleep(6)
+        print("FFPROBE 8a after stop, keyboard still hidden: " + focusState(host, search))
+        search.tap(); sleep(5)
+        print("FFPROBE 8a after tapping the field again: " + focusState(host, search))
+        shot("k3-field-again")
+        print("FFPROBE 8a clipboard has text: \(UIPasteboard.general.hasStrings)")
+    }
+
+    /// Q2+Q3: the control starts with no keyboard on screen (Contacts open, no field focused); stop; then the field.
+    func test8bShortcutNoKeyboardThenField() {
+        launch(onboarded: true)
+        startWarmSession()
+        XCUIDevice.shared.press(.home); sleep(2)
+        let (host, search) = contactsSearch()
+        print("FFPROBE 8b before: " + focusState(host, search))
+        pressControl("k4-control-start-no-keyboard")
+        sleep(12)
+        pressControl("k5-control-stop-no-keyboard")
+        host.activate(); sleep(4)
+        _ = showFreeFlowKeyboard(in: host, tapping: search)
+        sleep(5)
+        print("FFPROBE 8b after showing the Free Flow keyboard: " + focusState(host, search))
+        shot("k6-field-after")
+    }
+
+    /// Q1+Q3: field focused with the Free Flow keyboard up, the control starts, Hide, then the control stops.
+    func test8cShortcutKeyboardHiddenFieldFocused() {
+        launch(onboarded: true)
+        startWarmSession()
+        XCUIDevice.shared.press(.home); sleep(2)
+        let (host, search) = contactsSearch()
+        XCTAssertTrue(showFreeFlowKeyboard(in: host, tapping: search), "Free Flow keyboard did not appear")
+        pressControl("k7-control-start-keyboard-up")
+        host.activate(); sleep(2)
+        print("FFPROBE 8c listening with keyboard up: " + focusState(host, search))
+        if host.buttons["kb.hide"].exists { host.buttons["kb.hide"].firstMatch.tap(); sleep(2) }
+        print("FFPROBE 8c after Hide: " + focusState(host, search))
+        sleep(8)
+        pressControl("k8-control-stop-hidden")
+        host.activate(); sleep(6)
+        print("FFPROBE 8c after stop, hidden: " + focusState(host, search))
+        search.tap(); sleep(5)
+        print("FFPROBE 8c after tapping the field again: " + focusState(host, search))
+        shot("k9-after")
+    }
+
+    /// Build 32 help text: iOS 27's own words on Settings > Action Button (measure only).
+    func test9zActionButtonWording() {
+        let prefs = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        prefs.terminate(); prefs.launch(); sleep(2)
+        let row = prefs.staticTexts["Action Button"].firstMatch
+        for _ in 0..<8 where !(row.exists && row.isHittable) { prefs.swipeUp() }
+        print("FFWORDS settings row Action Button exists=\(row.exists)")
+        guard row.exists else { print("FFWORDS root: " + prefs.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")); return }
+        row.tap(); sleep(3)
+        for page in 0..<14 {
+            let words = prefs.staticTexts.allElementsBoundByIndex.map(\.label) + prefs.buttons.allElementsBoundByIndex.map(\.label)
+            print("FFWORDS page \(page): " + words.filter { !$0.isEmpty }.joined(separator: " | "))
+            let pick = prefs.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Choose a Control'")).firstMatch
+            if pick.exists {
+                pick.tap(); sleep(3)
+                print("FFWORDS chooser: " + (prefs.staticTexts.allElementsBoundByIndex.map(\.label) + prefs.searchFields.allElementsBoundByIndex.map { $0.placeholderValue ?? "" }).joined(separator: " | "))
+                break
+            }
+            prefs.swipeLeft(); sleep(2)
+        }
+    }
+
+    /// Build 33: cleanup slow on 3 dictations in a row (seeded through the argument domain) asks once in the
+    /// app; "Turn off cleanup" flips Settings > Writing; the question does not come back within 12 hours.
+    func testCS1SlowCleanupAsksOnce() {
+        launch(onboarded: true)
+        tab("Settings")
+        let toggle = app.switches["settings.appleWriter"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        setSwitch(toggle, on: true)
+        XCTAssertEqual(toggle.value as? String, "1", "cleanup must be on for this test")
+        app.terminate()
+        launch(onboarded: true, extra: ["-cleanup.slowStreak", "3", "-cleanup.askedAt", "<date>2000-01-01T00:00:00Z</date>"])
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "no slow-cleanup question")
+        print("FFCLEANUP alert: " + alert.label)
+        shot("cs1-ask")
+        XCTAssertTrue(alert.label.contains("Cleanup is taking a few seconds on this device"), alert.label)
+        alert.buttons["Turn off cleanup"].tap()
+        sleep(1)
+        tab("Settings")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        print("FFCLEANUP toggle after: \(toggle.value as? String ?? "?")")
+        XCTAssertEqual(toggle.value as? String, "0", "Turn off cleanup did not turn the setting off")
+        setSwitch(toggle, on: true)   // back on, as before the test
+        app.terminate()
+        launch(onboarded: true, extra: ["-cleanup.slowStreak", "3"])
+        sleep(4)
+        print("FFCLEANUP asked again within 12 h: \(app.alerts.firstMatch.exists)")
+        XCTAssertFalse(app.alerts.firstMatch.exists, "asked again within 12 hours")
     }
 
     /// Gate setup on a freshly erased simulator, the steps a person takes the first time (2026-10-29: fix the

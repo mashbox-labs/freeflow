@@ -116,7 +116,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func watchField() {
         let p = textDocumentProxy
-        let now = (p.documentIdentifier, p.keyboardType?.rawValue ?? 0, p.returnKeyType?.rawValue ?? 0)
+        // Build 32: a nil identifier from iOS is no field (reading it as a Swift UUID trapped, builds 19 to 30).
+        guard let field = FieldIdentity.read(p) else { return }
+        let now: (UUID?, Int, Int) = (field, p.keyboardType?.rawValue ?? 0, p.returnKeyType?.rawValue ?? 0)
         guard now != fieldSeen else { return }
         let newDocument = now.0 != fieldSeen.0
         fieldSeen = now
@@ -239,7 +241,8 @@ final class KeyboardViewController: UIInputViewController {
 
 @MainActor
 final class KeyboardModel: ObservableObject {
-    enum Mode: Equatable { case idle, opening, openFailed, listening, writing, message(String) }
+    /// starting (build 26): back from Free Flow, the keyboard asked for the start and waits for the app to record.
+    enum Mode: Equatable { case idle, opening, openFailed, starting, listening, writing, message(String) }
     @Published var mode: Mode = .idle
     @Published var levels = [Float](repeating: 0, count: 32)
     @Published var style = SharedSession.style
@@ -275,11 +278,18 @@ final class KeyboardModel: ObservableObject {
     private var timer: Timer?
     private var lastResult = ""
     private var openedAt: Date?
+    /// Build 26: when this keyboard asked for the start after a trip, and whether the dictation running is that one
+    /// (its title says "Listening, speak now").
+    private var startingAt: Date?
+    @Published var afterTrip = false
     /// Showing KeyboardLiveRule.stalledText: the app went quiet mid-dictation and may come back.
     private var stalled = false
     /// Autocorrect on space (Settings > Keyboard > Autocorrect). Does nothing until a word list is loaded.
     let autocorrect = AutocorrectTyper()
     private var lastUpWrite = Date.distantPast
+    /// Build 28: the result this keyboard is writing with Apple's model now (KeyboardWriting), and that work.
+    private var writingID: String?
+    private var writeTask: Task<Void, Never>?
     /// The keyboard that appeared last in this process. iOS can keep an earlier keyboard alive after its app has gone
     /// (it never gets viewWillDisappear, so it still counts itself visible). That keyboard took a finished dictation,
     /// typed it into the dead app and marked it done, and the keyboard on screen sat on Writing (UI tests test3Keyboard
@@ -305,6 +315,7 @@ final class KeyboardModel: ObservableObject {
         // keyboard comes back; anything else from before is old.
         lastResult = Self.awaitedResult ?? SharedSession.resultID
         poll()
+        startIfHandedOff()
         timer?.invalidate()
         // 10 a second: the meter and the state; phase changes also arrive at once through DarwinBus .state.
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 10, repeats: true) { [weak self] _ in
@@ -319,7 +330,31 @@ final class KeyboardModel: ObservableObject {
         autocorrect.reset()
         SharedSession.keyboardUpAt = nil
         // Hidden while opening Free Flow: Free Flow came to the front. Coming back, the poll picks up its listening.
-        if mode == .opening || mode == .openFailed { mode = .idle }
+        if mode == .opening || mode == .openFailed || mode == .starting { mode = .idle }
+        // A hidden keyboard types nothing: the writing stops, and the result stays owed as heard (KeyboardWriting),
+        // so a keyboard shown again writes it again. A write that finishes after this is never typed.
+        if let id = writingID {
+            Self.log.notice("FFWRITE kbd cancelled id=\(id.prefix(8), privacy: .public): keyboard hidden")
+            WriteDiagnostics.note("kbd", "cancelled-hidden", ["id": String(id.prefix(8))])
+            writeTask?.cancel(); writeTask = nil; writingID = nil
+        }
+    }
+
+    /// Build 26 (ColdStart): Free Flow is armed for a trip back and this keyboard is on screen in an app: ask for the
+    /// start at once, the same nonce-checked start as a warm tap. One ask per arming, whichever keyboard shows first.
+    func startIfHandedOff() {
+        guard visible, hasFullAccess, mode == .idle || mode == .opening || mode == .openFailed else { return }
+        guard let h = SharedSession.handoff,
+              ColdStart.keyboardShouldStart(handoff: h, claimed: SharedSession.handoffClaimed, truth: SharedSession.micState) else { return }
+        SharedSession.handoffClaimed = h.armedAt
+        lastResult = SharedSession.resultID
+        Self.awaitedResult = lastResult
+        KeyboardCommand.write(.start)
+        DarwinBus.shared.post(.start)
+        startingAt = Date()
+        afterTrip = true
+        mode = .starting
+        Self.log.notice("FFHANDOFF keyboard asked (armed \(String(format: "%.1f", Date().timeIntervalSince(h.armedAt)), privacy: .public) s ago)")
     }
 
     /// The result ID current when this keyboard asked for a dictation, kept in the App Group so the text still lands
@@ -447,13 +482,14 @@ final class KeyboardModel: ObservableObject {
     func tapMic() {
         switch mode {
         case .listening: finish(); return
-        case .writing, .opening: return
+        case .writing, .opening, .starting: return
         case .openFailed: openFreeFlow(); return
         default: break
         }
         lastResult = SharedSession.resultID
         Self.awaitedResult = lastResult
         SharedSession.tapAt = Date()
+        afterTrip = false
         if SharedSession.micState != .off {
             KeyboardCommand.write(.start)      // security: the app acts only on this keyboard's fresh nonce
             DarwinBus.shared.post(.start)
@@ -488,7 +524,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     func cancel() {
-        if mode == .listening { KeyboardCommand.write(.cancel); DarwinBus.shared.post(.cancel) }
+        if mode == .listening || mode == .starting { KeyboardCommand.write(.cancel); DarwinBus.shared.post(.cancel) }
         Self.awaitedResult = nil
         stalled = false
         mode = .idle
@@ -514,16 +550,88 @@ final class KeyboardModel: ObservableObject {
             Self.log.notice("FFINSERT left for the keyboard on screen id=\(id.prefix(8), privacy: .public)")
             return
         }
+        if writingID == id { return }   // Apple's model is writing it now
+        if let style = KeyboardWriting.style(ofResultID: id) {
+            let p = KeyboardWriting.pending.flatMap { $0.id == id ? $0 : nil } ?? KeyboardWriting.Pending(id: id, style: style, history: "")
+            writeThenType(id: id, pending: p); return
+        }
+        typeNow(id: id, text: SharedSession.resultText)
+    }
+
+    private func typeNow(id: String, text: String) {
         lastResult = id
         Self.awaitedResult = nil
         autocorrect.reset()
-        let text = SharedSession.resultText
         insert?(text)
         Self.log.notice("FFINSERT typed id=\(id.prefix(8), privacy: .public) chars=\(text.count, privacy: .public)")
         SharedSession.insertedID = id
         SharedSession.resultText = ""
         stalled = false
         mode = .idle
+    }
+
+    /// Build 28: the app finished this dictation in the background and handed it over (KeyboardWriting). Apple's
+    /// model writes it here, while the keyboard is on screen, then the keyboard types it. Unavailable, an error or the
+    /// time limit: the heard text (per piece, AppleRewrite).
+    private func writeThenType(id: String, pending p: KeyboardWriting.Pending) {
+        let heard = SharedSession.resultText
+        let words = WritingReadout.words(heard)
+        var unavailableReason: String? = heard.isEmpty ? "empty text" : nil
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *), !heard.isEmpty {
+            let check = AppleRewrite.check
+            if check.available {
+                writingID = id
+                mode = .writing
+                stage = "Writing · Apple Intelligence"
+                let limit = KeyboardWriting.seconds(words: words)
+                let mem0 = DeviceProfile.footprintBytes()
+                Self.log.notice("FFWRITE kbd start id=\(id.prefix(8), privacy: .public) words=\(words, privacy: .public) limit=\(limit, privacy: .public)s mem=\(mem0 / 1_000_000, privacy: .public)MB")
+                WriteDiagnostics.note("kbd", "start", ["id": String(id.prefix(8)), "words": words, "limit": limit, "memMB": Int(mem0 / 1_000_000)])
+                let os = UIDevice.current.userInterfaceIdiom == .pad ? "iPadOS" : "iOS"
+                writeTask = Task { @MainActor [weak self] in
+                    let o = await AppleRewrite.write(heard, style: p.style, deadline: Date().addingTimeInterval(limit), os: os, tag: "kbd")
+                    let mem1 = DeviceProfile.footprintBytes()
+                    guard let self, self.writingID == id else {
+                        Self.log.notice("FFWRITE kbd dropped id=\(id.prefix(8), privacy: .public): keyboard hidden while writing")
+                        return
+                    }
+                    self.writingID = nil; self.writeTask = nil
+                    let readout = WritingReadout(model: "Apple on-device model", runtime: "Apple Foundation Models in the keyboard",
+                                                 background: false, wordsIn: words, wordsOut: WritingReadout.words(o.text),
+                                                 seconds: o.seconds, keptRaw: o.kept,
+                                                 note: o.reasons.isEmpty ? nil : o.reasons.joined(separator: ", "), used: o.used)
+                    Self.log.notice("FFWRITE kbd done id=\(id.prefix(8), privacy: .public) used=\(o.used, privacy: .public) kept=\(o.kept, privacy: .public) requests=\(o.requests, privacy: .public) rate-limited=\(o.rateLimited, privacy: .public) ms=\(Int(o.seconds * 1000), privacy: .public) mem=\(mem1 / 1_000_000, privacy: .public)MB")
+                    WriteDiagnostics.note("kbd", "done", ["id": String(id.prefix(8)), "memMB": Int(mem1 / 1_000_000),
+                                                          "typed": SharedSession.resultID == id && Self.onScreen === self && self.visible])
+                    KeyboardWriting.pending = nil
+                    KeyboardWriting.done = KeyboardWriting.Done(id: id, text: o.text, history: p.history, used: o.used, kept: o.kept,
+                                                                seconds: o.seconds, wordsIn: words, wordsOut: readout.wordsOut,
+                                                                reason: readout.note)
+                    DarwinBus.shared.post(.keyboardWrote)
+                    guard SharedSession.resultID == id, SharedSession.insertedID != id, Self.onScreen === self, self.visible else {
+                        // Another keyboard is on screen now: it types the written text (KeyboardInsertRule).
+                        if SharedSession.resultID == id, SharedSession.insertedID != id { SharedSession.resultText = o.text }
+                        Self.log.notice("FFWRITE kbd left for the keyboard on screen id=\(id.prefix(8), privacy: .public)")
+                        return
+                    }
+                    self.typeNow(id: id, text: o.text)
+                }
+                return
+            }
+            unavailableReason = check.reason ?? String(describing: AppleRewrite.model.availability)
+            Self.log.notice("FFWRITE kbd unavailable id=\(id.prefix(8), privacy: .public): \(check.reason ?? "-", privacy: .public)")
+            WriteDiagnostics.note("kbd", "unavailable", ["reason": check.reason ?? "-"])
+        }
+        #endif
+        if unavailableReason == nil { unavailableReason = "needs iOS 26" }
+        KeyboardWriting.pending = nil
+        let why = "Apple Intelligence not available in the keyboard" + (unavailableReason.map { " (" + $0 + ")" } ?? "")
+        KeyboardWriting.done = KeyboardWriting.Done(id: id, text: heard, history: p.history, used: 0, kept: 1, seconds: 0,
+                                                    wordsIn: words, wordsOut: words, reason: why)
+        DarwinBus.shared.post(.keyboardWrote)
+        WriteDiagnostics.note("kbd", "as-heard", ["reason": why])
+        typeNow(id: id, text: heard)
     }
 
     func poll() {
@@ -538,7 +646,7 @@ final class KeyboardModel: ObservableObject {
         if status != label { status = label }
         let input = SharedSession.inputName
         if inputName != input { inputName = input }
-        let st = SharedSession.stage.isEmpty ? "Transcribing" : SharedSession.stage
+        let st = writingID != nil ? "Writing · Apple Intelligence" : (SharedSession.stage.isEmpty ? "Transcribing" : SharedSession.stage)
         if stage != st { stage = st }
         // The app can end its session in the same second the text is ready (KeyboardInsertRule): type owed text before
         // reading the mic state, so a finished dictation is never dropped or shown as "stopped listening".
@@ -555,11 +663,20 @@ final class KeyboardModel: ObservableObject {
         }
         if truth == .off {
             if mode == .opening, let t = openedAt, Date().timeIntervalSince(t) > 20 { mode = .idle }
+            if mode == .starting { mode = .message(SharedSession.offReason.isEmpty ? ColdStart.Words.didNotStart : SharedSession.offReason) }
             return
         }
+        // Build 26: the keyboard can be on screen before Free Flow has finished arming (or appear was missed).
+        if mode == .idle || mode == .opening || mode == .openFailed { startIfHandedOff() }
         switch SharedSession.phase {
         case .listening:
-            if (mode == .idle || mode == .opening || mode == .openFailed) && ownsDictation { mode = .listening }
+            let late = mode == .message(ColdStart.Words.didNotStart)   // it did start after all: show it, never hide a live mic
+            if (mode == .idle || mode == .opening || mode == .openFailed || mode == .starting || late) && ownsDictation {
+                if mode == .starting, let t = startingAt {
+                    Self.log.notice("FFHANDOFF keyboard saw listening \(String(format: "%.0f", Date().timeIntervalSince(t) * 1000), privacy: .public) ms after asking")
+                }
+                mode = .listening
+            }
             if mode == .listening {
                 let now = Array(SharedSession.levels.suffix(32))
                 if now != levels { levels = now }
@@ -580,6 +697,9 @@ final class KeyboardModel: ObservableObject {
         // This poll only runs while the keyboard is on screen. Still here 4 s after asking iOS to open Free Flow, and
         // Free Flow is not listening: it did not come up.
         if mode == .opening, let t = openedAt, Date().timeIntervalSince(t) > 4 { mode = .openFailed }
+        if mode == .starting, let t = startingAt, Date().timeIntervalSince(t) > ColdStart.keyboardGiveUp {
+            mode = .message(ColdStart.Words.didNotStart)
+        }
     }
 }
 
@@ -592,7 +712,7 @@ struct KeyboardView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.mode == .listening || model.mode == .writing {
+        if model.mode == .listening || model.mode == .writing || model.mode == .starting {
             ListeningKeyboard(model: model, showsGlobe: showsGlobe)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(.primary)
@@ -613,14 +733,14 @@ struct KeyboardView: View {
     private func classicStack(width: CGFloat) -> some View {
         VStack(spacing: 8) {
             switch model.mode {
-            case .listening, .writing:
+            case .listening, .writing, .starting:
                 EmptyView()   // ListeningKeyboard shows these, in both layouts
             case .opening:
                 topBar(width: width)
                 Spacer(minLength: 0)
                 VStack(spacing: 6) {
-                    Text("Opening Free Flow to start a session").font(FFFont.text(17, .bold))
-                    Text("Then tap the arrow at the top left to come back. Next time, no switch.").font(FFFont.text(14)).foregroundStyle(Palette.muted)
+                    Text(ColdStart.Words.opening).font(FFFont.text(17, .bold))
+                    Text(ColdStart.Words.openingHow).font(FFFont.text(14)).foregroundStyle(Palette.muted)
                 }
                 .multilineTextAlignment(.center)
                 Spacer(minLength: 0)

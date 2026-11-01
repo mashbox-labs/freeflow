@@ -65,12 +65,15 @@ final class ReturnCardTests: XCTestCase {
     func testTitleSaysRecordingOnlyWhileRecording() {
         XCTAssertEqual(ReturnCard.title(.listening), "Recording")
         XCTAssertEqual(ReturnCard.title(.off), "Starting")
-        XCTAssertEqual(ReturnCard.title(.ready), "Starting")
+        // Build 26: armed and waiting for the trip back, never "Recording".
+        XCTAssertEqual(ReturnCard.title(.ready), "Go back")
     }
 
     func testWordsArePlain() {
         let all = [ReturnCard.title(.listening), ReturnCard.title(.off), ReturnCard.Words.head, ReturnCard.Words.how,
-                   ReturnCard.Words.finish, ReturnCard.Words.stay, ReturnCard.Words.spoken(.listening), ReturnCard.Words.spoken(.off)]
+                   ReturnCard.Words.finish, ReturnCard.Words.stay, ReturnCard.Words.spoken(.listening), ReturnCard.Words.spoken(.off),
+                   ReturnCard.title(.ready), ReturnCard.Words.spoken(.ready), ColdStart.Words.keyboardStarting, ColdStart.Words.keyboardLive,
+                   ColdStart.Words.opening, ColdStart.Words.openingHow, ColdStart.Words.didNotStart, ColdStart.Words.gaveUp(60)]
         for line in all {
             XCTAssertFalse(line.isEmpty)
             XCTAssertNil(line.range(of: "dictate", options: .caseInsensitive), line)

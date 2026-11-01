@@ -158,7 +158,7 @@ struct SetupView: View {
 
     /// Build 18: Apple Intelligence is the writer and it is optional; where it can't run, the reason.
     private var writerCard: some View {
-        let on = writerChoice != WriterChoice.off.rawValue
+        let on = WriterChoice.resolved(raw: writerChoice) == .apple   // build 33: off unless turned on
         let state = WriterChoice.status(choice: on ? .apple : .off, appleAvailable: setup.apple.available, reason: setup.apple.reason).state
         return VStack(alignment: .leading, spacing: 8) {
             Toggle(isOn: Binding(get: { on }, set: { writerChoice = $0 ? WriterChoice.apple.rawValue : WriterChoice.off.rawValue })) {
@@ -176,7 +176,7 @@ struct SetupView: View {
 
     /// Where it runs (show where the model runs and how much memory it uses): only what the machine reports.
     private var whereCard: some View {
-        let on = writerChoice != WriterChoice.off.rawValue
+        let on = WriterChoice.resolved(raw: writerChoice) == .apple   // build 33: off unless turned on
         let writer = !on ? "Off" : setup.apple.available ? "Apple Intelligence, on this Mac" : "Not available: " + (setup.apple.reason ?? "Apple Intelligence can't run here")
         return VStack(alignment: .leading, spacing: 6) {
             Text("Where it runs").font(FFFont.text(16.5, .bold)).foregroundStyle(Palette.fg)

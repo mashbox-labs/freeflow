@@ -39,4 +39,18 @@ final class KeyboardCommandTests: XCTestCase {
         XCTAssertTrue(KeyboardCommand.accepts(c, name: .start, lastNonce: nil, currentSession: nil,
                                               fresh: KeyboardCommand.openFreshFor, now: now))
     }
+
+    /// Security (Mac, build 32): with no keyboard extension, even a well-formed, fresh, unused command is refused.
+    func testNoKeyboardOnThisPlatformRefusesEveryCommand() {
+        XCTAssertFalse(KeyboardCommand.accepts(command(.start), name: .start, lastNonce: nil, currentSession: nil, now: now, keyboard: false))
+        XCTAssertFalse(KeyboardCommand.accepts(command(.start), name: .start, lastNonce: nil, currentSession: nil,
+                                               fresh: KeyboardCommand.openFreshFor, now: now, keyboard: false))
+        XCTAssertFalse(KeyboardCommand.accepts(command(.finish, session: "s"), name: .finish, lastNonce: nil, currentSession: "s", now: now, keyboard: false))
+    }
+
+    /// Security (Mac, build 32): with no keyboard to read it, a finished dictation's text is never stored.
+    func testResultTextIsStoredOnlyWhereAKeyboardReadsIt() {
+        XCTAssertEqual(SharedSession.storedResultText("private words", keyboard: true), "private words")
+        XCTAssertNil(SharedSession.storedResultText("private words", keyboard: false))
+    }
 }

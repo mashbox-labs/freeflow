@@ -58,6 +58,8 @@ public enum DarwinName: String, CaseIterable, Sendable {
     /// can't write to the App Group, but a Darwin notification (no data) still reaches the app, so setup can show
     /// "added, Full Access off" instead of an old answer.
     case keyboardSeen, keyboardNoAccess
+    /// Build 28: the keyboard finished (or gave up) writing a handed-over dictation (KeyboardWriting.done).
+    case keyboardWrote
     var notificationName: String { FF.appGroup + "." + rawValue }
 }
 
@@ -116,9 +118,20 @@ public struct KeyboardCommand: Codable, Equatable, Sendable {
 
     /// True when `command` is the keyboard's real `name` request: written within `fresh` seconds, not used before, a
     /// start that opens its own session, or a finish or cancel for the dictation `currentSession` the keyboard started.
+    /// Security (Mac, build 32): the Mac has no keyboard extension, and its shared store is the app's own preferences,
+    /// which any process running as the user can write. So on the Mac no keyboard command is real.
+    public static var platformHasKeyboard: Bool {
+        #if targetEnvironment(macCatalyst)
+        return false
+        #else
+        return true
+        #endif
+    }
+
     public static func accepts(_ command: KeyboardCommand?, name: DarwinName, lastNonce: String?, currentSession: String?,
-                               fresh: TimeInterval = freshFor, now: Date = Date()) -> Bool {
-        guard let c = command, c.name == name.rawValue, !c.nonce.isEmpty, c.nonce != lastNonce else { return false }
+                               fresh: TimeInterval = freshFor, now: Date = Date(),
+                               keyboard: Bool = platformHasKeyboard) -> Bool {
+        guard keyboard, let c = command, c.name == name.rawValue, !c.nonce.isEmpty, c.nonce != lastNonce else { return false }
         let age = now.timeIntervalSince(c.at)
         guard age >= -1, age <= fresh else { return false }
         switch name {
@@ -169,10 +182,20 @@ public enum SharedSession {
         get { (d.array(forKey: Key.levels) as? [NSNumber])?.map(\.floatValue) ?? [] }
         set { d.set(newValue.map { NSNumber(value: $0) }, forKey: Key.levels) }
     }
+    /// Security (Mac, build 32): only the iOS keyboard reads the text. The Mac has no keyboard, and its store is the
+    /// app's plain preferences file, so there the text is never written and any old copy is removed.
     public static var resultText: String {
         get { d.string(forKey: Key.resultText) ?? "" }
-        set { d.set(newValue, forKey: Key.resultText) }
+        set {
+            if let kept = storedResultText(newValue, keyboard: KeyboardCommand.platformHasKeyboard) {
+                d.set(kept, forKey: Key.resultText)
+            } else {
+                d.removeObject(forKey: Key.resultText)
+            }
+        }
     }
+    /// What goes into the store for a result: the text where a keyboard reads it, nothing where none can.
+    public static func storedResultText(_ text: String, keyboard: Bool) -> String? { keyboard ? text : nil }
     public static var resultID: String {
         get { d.string(forKey: Key.resultID) ?? "" }
         set { d.set(newValue, forKey: Key.resultID) }
@@ -200,6 +223,16 @@ public enum SharedSession {
     public static var pendingStart: Date? {
         get { d.object(forKey: Key.pendingStart) as? Date }
         set { d.set(newValue, forKey: Key.pendingStart) }
+    }
+    /// Build 26 (ColdStart): Free Flow armed for a keyboard's trip back, written by the app; nil when not waiting.
+    public static var handoff: Handoff? {
+        get { d.data(forKey: "session.handoff").flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } }
+        set { d.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "session.handoff") }
+    }
+    /// The arming (Handoff.armedAt) a keyboard already asked to start, so one trip starts one dictation.
+    public static var handoffClaimed: Date? {
+        get { d.object(forKey: "session.handoffClaimed") as? Date }
+        set { d.set(newValue, forKey: "session.handoffClaimed") }
     }
     /// Build 23 (security): the keyboard's last command (KeyboardCommand), written by the keyboard.
     public static var keyboardCommand: KeyboardCommand? {

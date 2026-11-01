@@ -10,6 +10,10 @@ import FreeFlowKit
 final class AudioCapture: @unchecked Sendable {
     static let rate: Double = 16_000
     private var engine = AVAudioEngine()
+    /// Build 26: every engine start, stop and rebuild runs here, in order, never on the main thread for the Mac's fn
+    /// (startAsync / stopAsync): a Bluetooth mic's start took ~445 ms on the main thread in build 25, which also runs
+    /// the fn key tap and the pill. The sync start() / stop() wait on it (the iPhone app's path, unchanged).
+    private let control = DispatchQueue(label: "freeflow.audio.control", qos: .userInteractive)
     private var converter: AVAudioConverter?
     private let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
     private let lock = NSLock()
@@ -19,6 +23,33 @@ final class AudioCapture: @unchecked Sendable {
     private var fileTimer: DispatchSourceTimer?
     private var filePosition = 0
     private(set) var running = false
+    /// Build 26 (ColdStart): while Free Flow waits for the trip back, the mic's last seconds in memory only; guarded by
+    /// `lock`. Nothing else is kept while armed, and the ring is emptied when the dictation starts or the arming ends.
+    private var ring = PreRollRing(capacity: Int(rate * ColdStart.ringSeconds))
+    private var ringOn = false
+    /// Build 26 (Mac): seconds of audio kept from just before begin() while the mic is already on (Keep mic ready
+    /// on), so a word said a moment before fn is pressed is not cut. 0 (the iPhone app) keeps nothing from before begin().
+    var preroll: Double = 0
+    /// The last `preroll` seconds while not collecting, in a ring (Mac); guarded by `lock`.
+    private var macRing: [Float] = []
+    private var macRingNext = 0
+    private var macRingFull = false
+    /// Build 26: when (ProcessInfo.systemUptime) the engine's latest start returned, its first buffer arrived and its
+    /// first non-zero sample arrived; guarded by `lock`. A Bluetooth mic sends exact zeros for a while after it starts.
+    private var startedAt: Double?
+    private var firstBufferAt: Double?
+    private var firstSoundAt: Double?
+    /// Build 26 (Mac): a mic picked in Settings records through the Mac plug-in's own input unit (the Catalyst audio
+    /// session records only the system default), set by Catalyst/MacHost: start(uid, onAudio) returns "" once it runs,
+    /// else why not; onAudio brings mono Float32 samples, their count and rate on the audio thread.
+    var externalStart: ((String, @escaping (UnsafePointer<Float>, Int, Double) -> Void) -> String)?
+    var externalStop: (() -> Void)?
+    /// The uid recording through the plug-in now; nil when the engine (the default input) records. Control queue.
+    private(set) var externalUID: String?
+    var isExternal: Bool { control.sync { externalUID != nil } }
+    private var externalConverter: AVAudioConverter?
+    private var externalIn: AVAudioPCMBuffer?
+    private var externalRate: Double = 0
     var onLevel: ((Float) -> Void)?
     /// The listening bars' level: remapped RMS with attack / release (LevelShaper); guarded by `lock`.
     private var shaper = LevelShaper()
@@ -42,12 +73,79 @@ final class AudioCapture: @unchecked Sendable {
 
     var usesTestFile: Bool { fileSamples != nil }
 
-    /// True when a notification's object is this capture's engine (AVAudioEngineConfigurationChange is posted per engine).
-    func owns(_ object: Any?) -> Bool { (object as AnyObject?) === engine }
+    /// Simulator UI tests only (FF_TEST_REAL_SESSION=1 with FF_AUDIO_FILE): the session and the mic engine run as on a
+    /// device, so iOS keeps Free Flow running in the background the same way (UIBackgroundModes audio), but the samples
+    /// still come from the test file. Without it nothing holds the app awake in the background and the simulator suspends
+    /// it mid-dictation (build 26 RT1: "heartbeat gap 9.0s phase=listening", 3 s of an 11 s clip). No effect on a device:
+    /// iOS apps get no environment from people.
+    static let holdsRealSession = ProcessInfo.processInfo.environment["FF_TEST_REAL_SESSION"] == "1"
+    /// The real mic engine runs: always on a device, and with the test file only under holdsRealSession.
+    private var runsEngine: Bool { !usesTestFile || Self.holdsRealSession }
 
-    func start() throws {
+    /// True when a notification's object is this capture's engine (AVAudioEngineConfigurationChange is posted per engine).
+    func owns(_ object: Any?) -> Bool { let e = lock.withLock { engine }; return (object as AnyObject?) === e }
+
+    func start() throws { try control.sync { try startNow() } }
+
+    /// Build 26: `prepare` (the audio session) and the engine start on the control queue; the caller's thread is free.
+    func startAsync(prepare: @escaping () throws -> Void) async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            control.async {
+                do { try prepare(); try self.startNow(); done.resume() } catch { done.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// Build 26 (Mac): records from the plug-in's input `uid` instead of the engine, on the control queue.
+    func startAsync(external uid: String) async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            control.async {
+                do { try self.startExternalNow(uid); done.resume() } catch { done.resume(throwing: error) }
+            }
+        }
+    }
+
+    private func startExternalNow(_ uid: String) throws {
         guard !running else { return }
-        if usesTestFile { running = true; return }
+        guard let start = externalStart else { throw FFError("This microphone can't be used here.") }
+        lock.withLock { startedAt = nil; firstBufferAt = nil; firstSoundAt = nil; clearRing() }
+        let why = start(uid) { [weak self] samples, count, rate in self?.ingestExternal(samples, count, rate) }
+        guard why.isEmpty else { throw FFError(why) }
+        lock.withLock { startedAt = ProcessInfo.processInfo.systemUptime }
+        externalUID = uid
+        running = true
+    }
+
+    /// Audio thread (the plug-in's): to 16 kHz mono, then the same path as the engine's buffers.
+    private func ingestExternal(_ samples: UnsafePointer<Float>, _ count: Int, _ rate: Double) {
+        if rate == Self.rate { ingest(UnsafeBufferPointer(start: samples, count: count)); return }
+        if externalConverter == nil || externalRate != rate {
+            // Made once per rate (a device's rate changes only when it changes mode).
+            guard let from = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false) else { return }
+            externalConverter = AVAudioConverter(from: from, to: target)
+            externalIn = AVAudioPCMBuffer(pcmFormat: from, frameCapacity: 16_384)
+            externalRate = rate
+        }
+        guard let input = externalIn, let converter = externalConverter, count <= Int(input.frameCapacity),
+              let channel = input.floatChannelData?[0] else { return }
+        channel.update(from: samples, count: count)
+        input.frameLength = AVAudioFrameCount(count)
+        convert(input, with: converter)
+    }
+
+    /// Build 26: stop, then `after` (the audio session off), on the control queue; a start asked for later waits for it.
+    func stopAsync(after: (() -> Void)? = nil) {
+        control.async { self.stopNow(); after?() }
+    }
+
+    /// (start, first buffer, first non-zero sample) of the latest start, as ProcessInfo.systemUptime.
+    var startTimes: (started: Double?, buffer: Double?, sound: Double?) {
+        lock.withLock { (startedAt, firstBufferAt, firstSoundAt) }
+    }
+
+    private func startNow() throws {
+        guard !running else { return }
+        if !runsEngine { running = true; return }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -55,29 +153,43 @@ final class AudioCapture: @unchecked Sendable {
         }
         converter = AVAudioConverter(from: format, to: target)
         input.removeTap(onBus: 0)
+        let fromFile = usesTestFile
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
-            self?.convert(buffer)
+            guard let self, let converter = self.converter else { return }
+            if fromFile { return }   // holdsRealSession: the mic only holds the session; the file is what is heard
+            self.convert(buffer, with: converter)
         }
+        lock.withLock { startedAt = nil; firstBufferAt = nil; firstSoundAt = nil; clearRing() }
         engine.prepare()
         try engine.start()
+        lock.withLock { startedAt = ProcessInfo.processInfo.systemUptime }
         running = true
     }
 
-    func stop() {
+    func stop() { control.sync { stopNow() } }
+
+    private func stopNow() {
         stopFileFeed()
-        if !usesTestFile {
+        if externalUID != nil {
+            externalStop?()
+            externalUID = nil
+        } else if runsEngine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
         running = false
+        lock.withLock { clearRing() }
     }
 
     /// After iOS resets its media services every audio object is dead; start again from a new engine.
     func rebuild() {
-        stopFileFeed()
-        engine = AVAudioEngine()
-        converter = nil
-        running = false
+        control.sync {
+            stopFileFeed()
+            let fresh = AVAudioEngine()
+            lock.withLock { engine = fresh }
+            converter = nil
+            running = false
+        }
     }
 
     /// Restart after an interruption or a route change.
@@ -86,13 +198,54 @@ final class AudioCapture: @unchecked Sendable {
         try start()
     }
 
-    func begin() {
+    /// Build 26: keep (or stop keeping) the armed mic's last ColdStart.ringSeconds for a pre-roll. With the test file,
+    /// silence goes through the same path while armed (the scripted speaker talks once the keyboard listens).
+    func armPreRoll(_ on: Bool) {
+        lock.lock()
+        let was = ringOn
+        ringOn = on
+        ring.reset()
+        let busy = collecting
+        lock.unlock()
+        guard usesTestFile, !busy, on != was else { return }
+        if on { startFileFeed(silent: true) } else { stopFileFeed() }
+    }
+
+    /// Samples in the pre-roll ring now.
+    var preRollBuffered: Int { lock.lock(); defer { lock.unlock() }; return ring.count }
+
+    /// Starts keeping samples. `preRoll`: that many of the ring's newest samples go first (ColdStart), to memory and to
+    /// the clip, before anything the audio thread delivers next (both happen under the lock the audio thread takes).
+    func begin(preRoll: Int = 0) {
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         samples.reserveCapacity(Int(Self.rate) * 30)   // 30 s before the first regrowth copy on the audio thread
+        let pre = preRoll > 0 ? ring.last(preRoll) : []
+        ringOn = false
+        ring.reset()
+        if !pre.isEmpty {
+            samples.append(contentsOf: pre)
+            pre.withUnsafeBufferPointer { onChunk?($0) }
+        }
+        // Build 26 (Mac): what the mic heard just before (only when it was already on), oldest first. Built apart from
+        // `samples` so the audio thread's next append never has to copy a shared buffer.
+        var before: [Float] = []
+        if macRingFull { before.append(contentsOf: macRing[macRingNext...]) }
+        before.append(contentsOf: macRing[..<macRingNext])
+        samples.append(contentsOf: before)
+        clearRing()
         collecting = true
         lock.unlock()
+        if !before.isEmpty { before.withUnsafeBufferPointer { onChunk?($0) } }
         if usesTestFile { startFileFeed() }
+    }
+
+    /// Under `lock`.
+    private func clearRing() {
+        let n = Int(Self.rate * max(0, preroll))
+        if macRing.count != n { macRing = [Float](repeating: 0, count: n) }
+        macRingNext = 0
+        macRingFull = false
     }
 
     /// Samples kept since begin(), read while recording (the Mac mic test).
@@ -117,8 +270,7 @@ final class AudioCapture: @unchecked Sendable {
         return out
     }
 
-    private func convert(_ buffer: AVAudioPCMBuffer) {
-        guard let converter else { return }
+    private func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter) {
         let ratio = target.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64)
         if converted == nil || converted!.frameCapacity < capacity {
@@ -139,8 +291,15 @@ final class AudioCapture: @unchecked Sendable {
     private func ingest(_ chunk: UnsafeBufferPointer<Float>) {
         guard let base = chunk.baseAddress, !chunk.isEmpty else { return }
         lock.lock()
+        if firstBufferAt == nil { firstBufferAt = ProcessInfo.processInfo.systemUptime }
+        if firstSoundAt == nil, chunk.contains(where: { $0 != 0 }) { firstSoundAt = ProcessInfo.processInfo.systemUptime }
         let active = collecting
-        if active { samples.append(contentsOf: chunk) }
+        if active {
+            samples.append(contentsOf: chunk)
+        } else {
+            if ringOn { ring.write(chunk) }                  // iOS cold start (ColdStart)
+            if !macRing.isEmpty { keepInRing(chunk) }        // Mac Keep mic ready (preroll)
+        }
         lock.unlock()
         guard active else { return }
         onChunk?(chunk)
@@ -152,9 +311,24 @@ final class AudioCapture: @unchecked Sendable {
         onLevel?(level)
     }
 
+    /// Under `lock`, audio thread: the newest samples over the oldest, no allocation.
+    private func keepInRing(_ chunk: UnsafeBufferPointer<Float>) {
+        let n = macRing.count
+        var src = chunk.count > n ? chunk.count - n : 0
+        while src < chunk.count {
+            let k = min(n - macRingNext, chunk.count - src)
+            macRing.withUnsafeMutableBufferPointer { r in
+                (r.baseAddress! + macRingNext).update(from: chunk.baseAddress! + src, count: k)
+            }
+            src += k
+            macRingNext += k
+            if macRingNext == n { macRingNext = 0; macRingFull = true }
+        }
+    }
+
     // MARK: Test file source (simulator only use)
 
-    private func startFileFeed() {
+    private func startFileFeed(silent: Bool = false) {
         stopFileFeed()
         filePosition = 0
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
@@ -168,7 +342,7 @@ final class AudioCapture: @unchecked Sendable {
         chunk.initialize(repeating: 0)
         timer.setEventHandler { [weak self] in
             guard let self, let file = self.fileSamples else { return }
-            let n = max(0, min(step, file.count - self.filePosition))
+            let n = silent ? 0 : max(0, min(step, file.count - self.filePosition))
             file.withUnsafeBufferPointer { src in
                 if n > 0 { chunk.baseAddress!.update(from: src.baseAddress! + self.filePosition, count: n) }
             }

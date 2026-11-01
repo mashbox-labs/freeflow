@@ -88,6 +88,9 @@ final class DictationEngine: ObservableObject {
     /// running for a keyboard (nil when anything else started it).
     private var lastCommandNonce: String?
     private var keyboardSession: String?
+    /// Build 26 (ColdStart): Free Flow is armed for this keyboard's trip back (mic on, nothing recorded yet).
+    private var handoff: Handoff?
+    private let handoffWait = ColdStart.wait()
     /// How long Finish waits for the picked model to load before keeping the recording for later (a first Neural Engine
     /// build can take minutes: 114 s for Whisper large-v3-turbo on a Mac).
     static let prepareLimit: Double = 30
@@ -119,8 +122,19 @@ final class DictationEngine: ObservableObject {
     private var delivery: Task<TriggerDelivery, Never>?
 
     init() {
+        // Build 28: -ffAppWrites keeps writing in the app (the old way) for a side-by-side test; -ffKeyboardWrites
+        // turns the keyboard's writing back on. Without either, the stored choice (on by default) stays.
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-ffAppWrites") { KeyboardWriting.enabled = false }
+        if args.contains("-ffKeyboardWrites") { KeyboardWriting.enabled = true }
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) { BackgroundProbe.install() }
+        #endif
         let file = ProcessInfo.processInfo.environment["FF_AUDIO_FILE"]
         capture = AudioCapture(testFile: file.map { URL(fileURLWithPath: $0) })
+        #if targetEnvironment(macCatalyst)
+        capture.preroll = 0.3   // build 26: with the mic kept on between fn presses, the 0.3 s before the press stays
+        #endif
         capture.onLevel = { [weak self] level in
             DispatchQueue.main.async { self?.push(level) }
         }
@@ -132,12 +146,15 @@ final class DictationEngine: ObservableObject {
         }
         SharedSession.phase = .off
         SharedSession.heartbeat = nil
+        SharedSession.handoff = nil      // build 26: an arming from a run that ended is over
+        if !KeyboardCommand.platformHasKeyboard { SharedSession.resultText = "" }   // security: removes a Mac copy left by an older build
         #if !targetEnvironment(macCatalyst)
         // Build 23 (security): a keyboard command counts only with the keyboard's fresh, unused nonce
         // (KeyboardCommand). The Mac has no keyboard extension, so no Darwin observers there.
         DarwinBus.shared.observe(.start) { [weak self] in Task { @MainActor in await self?.keyboardCommand(.start) } }
         DarwinBus.shared.observe(.finish) { [weak self] in Task { @MainActor in await self?.keyboardCommand(.finish) } }
         DarwinBus.shared.observe(.cancel) { [weak self] in Task { @MainActor in await self?.keyboardCommand(.cancel) } }
+        DarwinBus.shared.observe(.keyboardWrote) { [weak self] in Task { @MainActor in self?.collectKeyboardWriting() } }
         #endif
         NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let type = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
@@ -185,13 +202,18 @@ final class DictationEngine: ObservableObject {
             case .busy: outcome = .busy
             case .openApp: outcome = .needsApp
             case .start:
+                if !e.sessionLive, Self.liveActivitiesOff {
+                    outcome = .failed(Self.liveActivityNeeded)   // build 31: never turn the mic on from a shortcut without one
+                    break
+                }
                 await e.startDictation(target: .trigger)
                 outcome = e.phase == .listening ? .listening : .failed(e.errorText ?? "Could not start.")
             case .stop:
                 outcome = await e.finishForTrigger()
             }
-            if case .failed = outcome { NoticePoster.post(outcome) }
-            return outcome
+            let checked = e.keepIntentPolicy() ?? outcome
+            if case .failed = checked { NoticePoster.post(checked) }
+            return checked
         }
         FFActions.finishDictation = {
             let e = DictationEngine.shared
@@ -201,7 +223,9 @@ final class DictationEngine: ObservableObject {
         }
         FFActions.startSession = {
             let e = DictationEngine.shared
+            if !e.sessionLive, Self.liveActivitiesOff { return Self.liveActivityNeeded }
             do { try await e.startSession() } catch { return error.localizedDescription }
+            if case .failed(let why)? = e.keepIntentPolicy() { return why }
             #if targetEnvironment(macCatalyst)
             return "Free Flow is ready. Hold fn in any app to dictate."
             #else
@@ -212,21 +236,75 @@ final class DictationEngine: ObservableObject {
 
     var settings: AppSettings { AppSettings() }
 
+    // MARK: Shortcuts (AudioRecordingIntent)
+
+    static var liveActivitiesOff: Bool {
+        #if targetEnvironment(macCatalyst)
+        return false
+        #else
+        return !ActivityAuthorizationInfo().areActivitiesEnabled
+        #endif
+    }
+
+    static let liveActivityNeeded = "Free Flow needs Live Activities to listen from a shortcut. Turn them on in Settings > Free Flow > Live Activities, then try again."
+
+    /// Build 31 (a build 30 crash, iOS 27.2): iOS ends the app when a Start/Stop or session shortcut finishes with
+    /// the mic on and no Live Activity running (AppIntents' system-policy check). Before a shortcut returns: the mic
+    /// off, or a Live Activity running. If iOS will not give one, the mic is turned off and the shortcut says why.
+    func keepIntentPolicy() -> TriggerOutcome? {
+        #if targetEnvironment(macCatalyst)
+        return nil
+        #else
+        guard sessionLive else { return nil }
+        if activity.isRunning { return nil }
+        if activity.start(model: ModelManager.shared.active.name) {
+            activity.update(phase: phase, detail: "")
+            return nil
+        }
+        recLog.log("shortcut: no live activity with the mic on, turning the mic off")
+        endSession("Live Activities are off for Free Flow")
+        return .failed(Self.liveActivityNeeded)
+        #endif
+    }
+
     // MARK: Session
 
     func startSession() async throws {
         if !sessionLive {
             SharedSession.offReason = ""
             activity.start(model: ModelManager.shared.active.name)
-            if !capture.usesTestFile {
+            if !capture.usesTestFile || AudioCapture.holdsRealSession {
                 guard await Self.micPermission() else {
                     throw FFError("Free Flow needs the microphone. Turn it on in Settings > Free Flow.")
                 }
+                #if targetEnvironment(macCatalyst)
+                // Build 26: the session and the engine start off the main thread (the fn tap and the pill stay live).
+                // A mic picked in Settings that is not the default records through the Mac plug-in instead.
+                if let own = macOwnInput?() {
+                    try await capture.startAsync(external: own.uid)
+                    ownInputName = own.name
+                } else {
+                    ownInputName = nil
+                    let mix = settings.mixWithOthers, duck = settings.duckOthers
+                    try await capture.startAsync {
+                        try AudioSessionSetup.configure(AVAudioSession.sharedInstance(), mixWithOthers: mix, duckOthers: duck)
+                    }
+                }
+                #else
                 try configureAudioSession()
+                #endif
             }
+            #if targetEnvironment(macCatalyst)
+            if capture.usesTestFile { try capture.start() }
+            #else
             try capture.start()
+            #endif
             sessionLive = true
+            #if targetEnvironment(macCatalyst)
+            SharedSession.inputName = capture.usesTestFile ? "Test recording" : ownInputName ?? Self.inputName()
+            #else
             SharedSession.inputName = capture.usesTestFile ? "Test recording" : Self.inputName()
+            #endif
             heartbeat?.invalidate()
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.beat() }
@@ -244,12 +322,22 @@ final class DictationEngine: ObservableObject {
     func endSession(_ why: String = "You turned it off") {
         recLog.log("session end phase=\(self.phase.rawValue, privacy: .public) why=\(why, privacy: .public)")
         if sessionLive { SharedSession.noteEnd(why) }
+        endHandoff()
         lastBeat = nil
         if phase == .listening {
             _ = capture.end()
             recorder.stop(.interrupted, reason: ClipReason.sessionEnded)
         }
+        #if targetEnvironment(macCatalyst)
+        // Build 26: off the main thread, in order with the next start.
+        if capture.usesTestFile {
+            capture.stop()
+        } else {
+            capture.stopAsync { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        }
+        #else
         capture.stop()
+        #endif
         heartbeat?.invalidate()
         heartbeat = nil
         sessionLive = false
@@ -258,9 +346,11 @@ final class DictationEngine: ObservableObject {
         SharedSession.endsAt = nil
         setPhase(.off)
         activity.end()
-        if !capture.usesTestFile {
+        #if !targetEnvironment(macCatalyst)
+        if !capture.usesTestFile || AudioCapture.holdsRealSession {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+        #endif
     }
 
     private func extendSession() {
@@ -289,6 +379,7 @@ final class DictationEngine: ObservableObject {
         if let at = SharedSession.resultAt, Date().timeIntervalSince(at) > KeyboardAwait.window, !SharedSession.resultText.isEmpty {
             SharedSession.resultText = ""
         }
+        if let h = handoff, ColdStart.expired(armedAt: h.armedAt, now: now, wait: handoffWait) { handoffGaveUp() }
         if ArmWindow.shouldDisarm(endsAt: sessionEndsAt, phase: phase, resultAt: SharedSession.resultAt) {
             endSession("The mic's \(settings.sessionMinutes)-minute window ended")
         }
@@ -298,7 +389,22 @@ final class DictationEngine: ObservableObject {
 
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
+        #if targetEnvironment(macCatalyst)
         try AudioSessionSetup.configure(session, mixWithOthers: settings.mixWithOthers, duckOthers: settings.duckOthers)
+        #else
+        // Build 26 (MicChoice): built-in by default; a picked Bluetooth headset mic adds hands-free (HFP).
+        let saved = settings.micInput
+        try AudioSessionSetup.configure(session, mixWithOthers: settings.mixWithOthers, duckOthers: settings.duckOthers,
+                                        bluetoothMic: MicChoice.needsHandsFree(saved: saved, savedIsBluetooth: settings.micInputBluetooth))
+        let ports = session.availableInputs ?? []
+        if let want = MicChoice.preferred(saved: saved, available: ports.map(Self.micInput)),
+           let port = ports.first(where: { $0.uid == want.uid }) {
+            do { try session.setPreferredInput(port) } catch {
+                recLog.log("preferred input \(port.portType.rawValue, privacy: .public) refused: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        recLog.log("mic pick=\(saved.isEmpty ? "built-in" : "saved", privacy: .public) route=\(Self.inputName(), privacy: .public)")
+        #endif
         KeyClickCounts.hapticsAllowedWhileMic = session.allowHapticsAndSystemSoundsDuringRecording
     }
 
@@ -324,6 +430,9 @@ final class DictationEngine: ObservableObject {
     private func routeChanged() {
         recLog.log("engine configuration change phase=\(self.phase.rawValue, privacy: .public) live=\(self.sessionLive, privacy: .public) input=\(Self.inputName(), privacy: .public)")
         guard sessionLive, !capture.usesTestFile else { return }
+        #if targetEnvironment(macCatalyst)
+        guard ownInputName == nil else { return }   // build 26: the plug-in's input is not this engine's
+        #endif
         Task { @MainActor in
             for attempt in 1...10 {
                 do {
@@ -391,6 +500,10 @@ final class DictationEngine: ObservableObject {
         }
     }
 
+    static func micInput(_ p: AVAudioSessionPortDescription) -> MicChoice.Input {
+        MicChoice.Input(uid: p.uid, name: p.portName, isBluetooth: p.portType == .bluetoothHFP, isBuiltIn: p.portType == .builtInMic)
+    }
+
     static func inputName() -> String {
         AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "Microphone"
     }
@@ -417,7 +530,9 @@ final class DictationEngine: ObservableObject {
         lastCommandNonce = command.nonce
         SharedSession.keyboardCommand = nil
         switch name {
-        case .start: await startDictation(target: .keyboard, session: command.session)
+        case .start:
+            // Build 26: the keyboard is back after a trip; its start keeps the pre-roll from just before it asked.
+            await startDictation(target: .keyboard, session: command.session, preRollFrom: handoff == nil ? nil : command.at)
         case .finish: _ = await finishDictation()
         case .cancel: cancelDictation()
         default: break
@@ -440,8 +555,7 @@ final class DictationEngine: ObservableObject {
                     SharedSession.pendingStart = nil
                     SharedSession.keyboardCommand = nil
                     lastCommandNonce = command.nonce
-                    updateReturnCard { $0.openedByKeyboard() }
-                    await startDictation(target: .keyboard, session: command.session)
+                    await armForReturn(session: command.session)
                     return
                 }
                 if fromLink, attempt == tries - 1 {
@@ -454,7 +568,56 @@ final class DictationEngine: ObservableObject {
         }
     }
 
-    func startDictation(target: Target, session: String? = nil) async {
+    /// Build 26 (ColdStart): the keyboard opened Free Flow. Turn the mic on here, in the foreground (an app in the
+    /// background cannot start recording), keep only the pre-roll ring, and wait for a keyboard to show again in an app.
+    /// It starts the dictation from there (keyboardCommand .start). Nothing said while Free Flow is in front is kept.
+    private func armForReturn(session: String) async {
+        guard !starting, phase != .listening, phase != .transcribing else { return }
+        updateReturnCard { $0.openedByKeyboard() }
+        guard ModelManager.shared.activeReady else {
+            fail(ModelManager.shared.activeMissing
+                 ? "Your speech model is missing. Open Free Flow, then Models, to download it again."
+                 : "Download a speech model first: open Free Flow, then Models.")
+            return
+        }
+        starting = true
+        defer { starting = false }
+        errorText = nil
+        SharedSession.error = ""
+        do { try await startSession() } catch { fail(error.localizedDescription); return }
+        capture.armPreRoll(true)
+        let h = Handoff(session: session, armedAt: Date())
+        handoff = h
+        SharedSession.handoffClaimed = nil
+        SharedSession.handoff = h
+        recLog.log("armed for the trip back, waits \(Int(self.handoffWait), privacy: .public) s")
+        DarwinBus.shared.post(.state)
+        // Load the model while the person goes back.
+        Task { try? await ModelManager.shared.ensureLoaded() }
+    }
+
+    /// The trip is over (a dictation started, the session ended, or nobody came back): the ring stops and empties.
+    private func endHandoff() {
+        guard handoff != nil || SharedSession.handoff != nil else { return }
+        handoff = nil
+        SharedSession.handoff = nil
+        capture.armPreRoll(false)
+    }
+
+    /// Nobody went back within ColdStart.waitForReturn: the mic turns off (no orange dot left on) and every surface says why.
+    private func handoffGaveUp() {
+        recLog.log("trip back: nobody came back in \(Int(self.handoffWait), privacy: .public) s; mic off")
+        endHandoff()
+        updateReturnCard { $0.leftApp() }
+        guard phase == .ready else { return }
+        let why = ColdStart.Words.gaveUp(handoffWait)
+        endSession(why)
+        SharedSession.offReason = why
+        errorText = why
+        DarwinBus.shared.post(.state)
+    }
+
+    func startDictation(target: Target, session: String? = nil, preRollFrom signalAt: Date? = nil) async {
         guard !starting, phase != .listening, phase != .transcribing else { return }
         guard retryingID == nil else { fail("Free Flow is transcribing a saved recording. Try again in a moment."); return }
         starting = true
@@ -468,28 +631,85 @@ final class DictationEngine: ObservableObject {
                  : "Download a speech model first: open Free Flow, then Models.")
             return
         }
+        #if targetEnvironment(macCatalyst)
+        // Build 26: keep audio from the engine's very first buffer. With the mic off, collecting starts before the mic
+        // does (build 25 began after the start returned); with it on, begin() also keeps the last 0.3 s (preroll).
+        trace.main = Self.now()
+        trace.warm = wasArmed
+        dropLastKept()
+        recorder.start()
+        capture.begin()
+        do { try await startSession() } catch {
+            _ = capture.end()
+            if let clip = recorder.stop(.cancelled, reason: ClipReason.cancelled) { ClipStore.shared.delete(clip.id) }
+            fail(error.localizedDescription); return
+        }
+        trace.session = Self.now()
+        #else
         do { try await startSession() } catch { fail(error.localizedDescription); return }
+        #endif
         self.target = target
         // Build 23 (security): the keyboard that asked owns this dictation's text; any other start owns none.
         keyboardSession = target == .keyboard ? session : nil
         SharedSession.dictationSession = keyboardSession ?? (target == .trigger ? KeyboardCommand.triggerSession : "")
         feed.reset()
         LevelMeter.shared.show(feed.snapshot)
+        #if !targetEnvironment(macCatalyst)
         dropLastKept()          // build 23: the last dictation's audio goes when the next dictation starts
         recorder.start()
-        capture.begin()
+        let pre = signalAt.map { ColdStart.preRollSamples(signalAt: $0, now: Date(), rate: AudioCapture.rate, buffered: capture.preRollBuffered) } ?? 0
+        capture.begin(preRoll: pre)
+        #else
+        let pre = 0   // the Mac has no keyboard trip (its begin() ran before the session, with its own preroll)
+        #endif
+        endHandoff()
         setPhase(.listening)
         recLog.log("listening target=\(String(describing: target), privacy: .public) footprintMB=\(DeviceProfile.footprintBytes() >> 20, privacy: .public)")
+        if let signalAt {
+            // Build 26: keyboard back in the app (its ask) to capture live, and the pre-roll kept.
+            let ms = Date().timeIntervalSince(signalAt) * 1000
+            latencyLog.notice("FFHANDOFF ask_to_live_ms=\(ms, format: .fixed(precision: 1), privacy: .public) preroll_ms=\(Double(pre) / AudioCapture.rate * 1000, format: .fixed(precision: 0), privacy: .public)")
+            NSLog("FFHANDOFF ask_to_live_ms=%.1f preroll_ms=%.0f", ms, Double(pre) / AudioCapture.rate * 1000)
+        }
         simulateInterruptionIfAsked()
-        noteLatency(target: target, warm: wasArmed)
+        if signalAt == nil { noteLatency(target: target, warm: wasArmed) }   // the trip's own line is FFHANDOFF
         // Load the model while you talk.
         Task { try? await ModelManager.shared.ensureLoaded() }
     }
 
+    #if targetEnvironment(macCatalyst)
+    /// Build 26: one fn press's start, on the monotonic clock (ProcessInfo.systemUptime). keyDown comes from the fn tap.
+    /// Build 26: the picked mic to record from through the Mac plug-in (uid, name), or nil for the default input
+    /// (Catalyst/MacHost decides: MacMic.ownInput). The name of the one recording now.
+    var macOwnInput: (() -> (uid: String, name: String)?)?
+    private(set) var ownInputName: String?
+
+    struct StartTrace { var keyDown: Double?, tap: Double = 0, host: Double = 0, main: Double = 0, session: Double = 0, warm = false }
+    var trace = StartTrace()
+
+    static func now() -> Double { ProcessInfo.processInfo.systemUptime }
+
+    /// Build 26: "FFSTART" line, ms from fn down: the main thread has it, the mic is on, the first buffer, the first
+    /// non-zero sample. Audio before the first non-zero sample was never heard (Bluetooth sends zeros while it switches).
+    func logStart(_ outcome: String) {
+        guard let down = trace.keyDown else { return }
+        trace.keyDown = nil
+        let t = capture.startTimes
+        let warm = trace.warm
+        func ms(_ x: Double?) -> String { x.map { String(format: "%.0f", ($0 - down) * 1000) } ?? "-" }
+        let line = "warm=\(warm) tap=\(ms(trace.tap)) host=\(ms(trace.host)) main=\(ms(trace.main)) micOn=\(ms(warm ? nil : trace.session)) engine=\(ms(warm ? nil : t.started)) firstBuffer=\(ms(warm ? nil : t.buffer)) firstSound=\(ms(warm ? nil : t.sound)) input=\(SharedSession.inputName) \(outcome)"
+        latencyLog.notice("FFSTART fn \(line, privacy: .public)")
+    }
+    #endif
+
     @discardableResult
     func finishDictation() async -> String {
         guard phase == .listening else { return "" }
+        collectKeyboardWriting()
         let audio = capture.end()
+        #if targetEnvironment(macCatalyst)
+        logStart("audio=\(String(format: "%.2f", Double(audio.count) / AudioCapture.rate))s")
+        #endif
         // The clip stays on disk until the text is out: if Free Flow ends now, it is offered at the next launch.
         let clip = recorder.stop(.transcribing)
         setPhase(.transcribing)
@@ -565,8 +785,27 @@ final class DictationEngine: ObservableObject {
             let style = SharedSession.style
             // Build 12: the recognizer's words (dictionary applied in decoding), never rewritten by a rule; the on-device
             // writing model (WritingModel) writes them in the chosen style, or they go in as heard.
-            if let writer = WritingModel.stageName() { setStage("Writing · " + writer) }
-            let (text, readout) = await WritingModel.written(DictationText.finish(raw), style: style)
+            // Build 28: a keyboard dictation finished while Free Flow is in the background is written by Apple's
+            // model in the keyboard (KeyboardWriting): Apple rate-limits it here, in the background, and not there.
+            let heard = DictationText.finish(raw)
+            let handOver = !heard.isEmpty && KeyboardWriting.handOver(fromKeyboard: target == .keyboard,
+                                                       appActive: WritingModel.inForeground(),
+                                                       writerOn: WriterChoice.resolved != .off,
+                                                       appleAvailable: WritingModel.appleSeen, enabled: KeyboardWriting.enabled)
+            let text: String, readout: WritingReadout?
+            if handOver {
+                NSLog("FFWRITE app handed-over words=%d style=%@", WritingReadout.words(heard), style.rawValue)
+                WriteDiagnostics.note("app-bg", "handed-over", ["words": WritingReadout.words(heard), "style": style.rawValue])
+                text = heard
+                // Until the keyboard reports (KeyboardWriting.done), the card says nothing was written yet.
+                readout = KeyboardWriting.handedOverReadout(words: WritingReadout.words(heard))
+                WritingReadoutStore.shared.last = readout
+                WritingReadoutStore.shared.heard = heard
+                WritingReadoutStore.shared.notUsed = nil
+            } else {
+                if let writer = WritingModel.stageName() { setStage("Writing · " + writer) }
+                (text, readout) = await WritingModel.written(heard, style: style)
+            }
             let notUsed = WritingReadoutStore.shared.notUsed
             stats = RunStats(audioSeconds: seconds, processSeconds: elapsed, loadSeconds: load > 0 ? load : (models.loadSeconds ?? 0), modelName: ranName,
                              footprintMB: Double(DeviceProfile.footprintBytes()) / 1_000_000,
@@ -574,9 +813,12 @@ final class DictationEngine: ObservableObject {
             transcript = text
             // Before history: on first use the stats store counts older history once, so this one must not be in it yet.
             StatsStore.shared.record(.live(text: text, raw: raw, samples: audio, rate: AudioCapture.rate, processSeconds: elapsed, model: ranName))
+            var historyID = ""
             if settings.keepHistory, !text.isEmpty {
-                HistoryStore.shared.add(HistoryItem(text: text, raw: raw, style: style, model: ranName,
-                                                    audioSeconds: seconds, processSeconds: elapsed, writer: readout?.short))
+                let item = HistoryItem(text: text, raw: raw, style: style, model: ranName,
+                                       audioSeconds: seconds, processSeconds: elapsed, writer: readout?.short)
+                HistoryStore.shared.add(item)
+                historyID = item.id.uuidString
             }
             // Finished: the text is out. Build 23: Apple Intelligence's version left out words -> the recording stays in
             // Recent recordings with both texts. Otherwise, with LastDictation.keepAudio, the last dictation's audio stays
@@ -600,9 +842,15 @@ final class DictationEngine: ObservableObject {
             }
             SharedSession.resultText = text
             SharedSession.resultAt = Date()
-            let id = UUID().uuidString
+            let id = handOver ? KeyboardWriting.resultID(style: style) : UUID().uuidString
+            // The id itself marks a hand-over (KeyboardWriting.style(ofResultID:)); the record adds the History item.
+            KeyboardWriting.pending = handOver ? KeyboardWriting.Pending(id: id, style: style, history: historyID) : nil
             SharedSession.resultID = id
             setPhase(.done)
+            #if targetEnvironment(macCatalyst)
+            // Build 26 (Keep mic ready): the window counts from the end of the last dictation.
+            if sessionLive { extendSession() }
+            #endif
             delivery = target == .trigger ? Task { await self.deliverTrigger(text, id: id) } : nil
             return text
         } catch {
@@ -629,7 +877,8 @@ final class DictationEngine: ObservableObject {
         let result = await TriggerRouting.deliver(text: text, id: id, keyboardSeenAt: { SharedSession.keyboardUpAt },
                                                   insertedID: { SharedSession.insertedID },
                                                   copy: { UIPasteboard.general.string = $0 })
-        activity.update(phase: .done, detail: text, label: result == .typed ? "Typed" : "Copied")
+        // Security (build 32): the Lock Screen shows the status only, never the dictated words.
+        activity.update(phase: .done, detail: "", label: result == .typed ? "Typed" : "Copied")
         NoticePoster.post(.finished(result, text: text))
         return result
     }
@@ -646,9 +895,15 @@ final class DictationEngine: ObservableObject {
     func cancelDictation() {
         guard phase == .listening else { return }
         _ = capture.end()
+        #if targetEnvironment(macCatalyst)
+        logStart("cancelled")
+        #endif
         // X cancels the paste, never the audio: the clip waits in History > Recent recordings with Retry.
         recorder.stop(.cancelled, reason: ClipReason.cancelled)
         setPhase(sessionLive ? .ready : .off)
+        #if targetEnvironment(macCatalyst)
+        if sessionLive { extendSession() }   // build 26: Keep mic ready counts from here too
+        #endif
     }
 
     // MARK: Saved recordings
@@ -754,7 +1009,30 @@ final class DictationEngine: ObservableObject {
         if url.host == "dictate" { startFromKeyboardOpen(fromLink: true) }
     }
 
+    /// Build 28: the text the keyboard wrote and typed for a handed-over dictation goes into History in place of
+    /// the heard text it was saved with (once; the keyboard's report is then cleared).
+    func collectKeyboardWriting() {
+        guard let done = KeyboardWriting.done else { return }
+        KeyboardWriting.done = nil
+        let r = done.readout
+        // The card shows the keyboard's own readout: written, or as heard and why.
+        if done.id == SharedSession.resultID {
+            WritingReadoutStore.shared.last = r
+            if !done.text.isEmpty { transcript = done.text }
+        }
+        if let hid = UUID(uuidString: done.history), !done.text.isEmpty {
+            HistoryStore.shared.update(hid) { $0.text = done.text; $0.writer = r.short }
+        }
+        NSLog("FFWRITE app collected keyboard result id=%@ used=%d kept=%d why=%@", String(done.id.prefix(8)), done.used, done.kept, done.reason ?? "-")
+        WriteDiagnostics.note("app", "collected", ["used": done.used, "kept": done.kept, "ms": Int(done.seconds * 1000),
+                                                   "reason": done.reason ?? ""])
+        if done.seconds > 0 { CleanupSpeed.note(seconds: done.seconds) }   // build 33: the keyboard's cleanup step
+        CleanupAsk.shared.check()
+    }
+
     func becameActive() {
+        collectKeyboardWriting()
+        CleanupAsk.shared.check()   // build 33: a slow run recorded while Free Flow was in the background
         ModelManager.shared.refresh()
         #if DEBUG || FF_TESTS
         // Test builds only (security): the model-switching test from a launch argument.
@@ -773,6 +1051,8 @@ final class DictationEngine: ObservableObject {
         if ModelManager.shared.activeReady { Task { try? await ModelManager.shared.ensureLoaded() } }
         // Build 18: Apple's model is prewarmed too, never when writing is off.
         WritingModel.warm()
+        // Build 26: back in Free Flow while it still waits for the trip back: the card says so again.
+        if handoff != nil, phase == .ready { updateReturnCard { $0.openedByKeyboard() } }
         startFromKeyboardOpen()
     }
 
@@ -780,7 +1060,12 @@ final class DictationEngine: ObservableObject {
     func leftApp() { updateReturnCard { $0.leftApp() } }
 
     /// Stay here on the return card: Free Flow itself, with its own Finish and Cancel.
-    func stayHere() { updateReturnCard { $0.stay() } }
+    /// Build 26: Stay here starts the dictation in Free Flow now (the trip's keyboard still types it when it is back).
+    func stayHere() {
+        updateReturnCard { $0.stay() }
+        guard let h = handoff else { return }
+        Task { await startDictation(target: .keyboard, session: h.session) }
+    }
 
     /// Publishes only a real change: every @Published assignment redraws what observes the engine.
     private func updateReturnCard(_ change: (inout ReturnCard) -> Void) {
@@ -876,7 +1161,7 @@ final class DictationEngine: ObservableObject {
         updateReturnCard { $0.phaseChanged(p) }
         SharedSession.phase = p
         DarwinBus.shared.post(.state)
-        activity.update(phase: p, detail: p == .done ? transcript : (errorText ?? ""))
+        activity.update(phase: p, detail: p == .done ? "" : (errorText ?? ""))   // security: no dictated words on the Lock Screen
     }
 
     /// Build 22: the picked model is still loading after prepareLimit (a first Neural Engine build can take
@@ -932,6 +1217,7 @@ final class DictationEngine: ObservableObject {
     }
 
     private func fail(_ message: String) {
+        endHandoff()
         errorIsSaved = false
         errorText = message
         SharedSession.error = message
@@ -1000,8 +1286,9 @@ struct AppSettings {
     private let d = UserDefaults.standard
     var sessionMinutes: Int {
         #if targetEnvironment(macCatalyst)
-        // Build 23 (F2): the Mac's own choice; 0 (off right after a dictation) leaves the usual window for other starts.
+        // Build 23: the Mac's own choice; 0 (off right after a dictation) leaves the usual window for other starts.
         let mac = MacMic.minutes(stored: d.object(forKey: MacMic.key) as? Int)
+        if mac == MacMic.always { return 525_600 }   // build 26: Always = a year, i.e. while Free Flow runs
         if mac > 0 { return mac }
         #endif
         return ArmWindow.minutes(stored: d.object(forKey: "sessionMinutes") as? Int)
@@ -1009,6 +1296,9 @@ struct AppSettings {
     var mixWithOthers: Bool { d.object(forKey: "mixWithOthers") as? Bool ?? true }
     var duckOthers: Bool { d.object(forKey: "duckOthers") as? Bool ?? false }
     var keepHistory: Bool { d.object(forKey: "keepHistory") as? Bool ?? true }
+    /// Build 26 (MicChoice): the picked input's port UID ("" = built-in) and whether it is a Bluetooth hands-free mic.
+    var micInput: String { d.string(forKey: MicChoice.key) ?? "" }
+    var micInputBluetooth: Bool { d.bool(forKey: MicChoice.bluetoothKey) }
 }
 
 #if targetEnvironment(macCatalyst)
@@ -1016,7 +1306,8 @@ struct AppSettings {
 @MainActor
 final class LiveActivityController {
     var endsAt: Date?
-    func start(model: String) {}
+    var isRunning: Bool { true }
+    @discardableResult func start(model: String) -> Bool { true }
     func update(phase: SessionPhase, detail: String, label override: String? = nil) {}
     func end() {}
 }
@@ -1032,13 +1323,46 @@ final class LiveActivityController {
         didSet { if oldValue != endsAt { push() } }
     }
 
-    func start(model: String) {
-        guard activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+    /// Build 31: on screen now. One the person swiped away, or that iOS ended, no longer counts (build 30 kept holding it,
+    /// so a later shortcut ran with the mic on and no Live Activity, which iOS 27 ends the app for).
+    var isRunning: Bool {
+        guard let activity else { return false }
+        return activity.activityState != .ended && activity.activityState != .dismissed
+    }
+
+    /// Starts the Live Activity, or keeps the one on screen. True when one is running afterwards.
+    @discardableResult
+    func start(model: String) -> Bool {
+        if activity != nil, !isRunning { activity = nil }
+        if activity == nil {
+            // Build 31: one an earlier run left on screen (a crash or a kill) is taken over, never doubled.
+            let open = Activity<DictationActivityAttributes>.activities.filter { $0.activityState != .ended && $0.activityState != .dismissed }
+            if let first = open.first {
+                activity = first
+                for extra in open.dropFirst() { Task { await extra.end(nil, dismissalPolicy: .immediate) } }
+                startedAt = Date(); lastLabel = "Ready"; lastDetail = ""
+                push()
+                recLog.log("live activity taken over open=\(open.count, privacy: .public)")
+                return true
+            }
+        } else {
+            return true
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            recLog.log("live activity off for Free Flow")
+            return false
+        }
         startedAt = Date()
         lastLabel = "Ready"; lastDetail = ""
         let state = DictationActivityAttributes.ContentState(phase: "Ready", detail: "", startedAt: startedAt, endsAt: endsAt)
-        activity = try? Activity.request(attributes: DictationActivityAttributes(modelName: model),
-                                         content: ActivityContent(state: state, staleDate: nil))
+        do {
+            activity = try Activity.request(attributes: DictationActivityAttributes(modelName: model),
+                                            content: ActivityContent(state: state, staleDate: nil))
+            return true
+        } catch {
+            recLog.log("live activity refused: \(String(describing: error), privacy: .public)")
+            return false
+        }
     }
 
     func update(phase: SessionPhase, detail: String, label override: String? = nil) {
@@ -1101,6 +1425,7 @@ enum WritingModel {
             // Build 15: the step has a time limit (WritingBudget); past it the text goes in as heard, never a stall.
             // Build 18: the WHOLE step (availability check and writing) runs under it, on its own task.
             let budget = WritingBudget.seconds(words: WritingReadout.words(text))
+            let began = Date()
             let deadline = Date().addingTimeInterval(budget)
             let routed = await Deadline.run(budget + 0.25) { () -> (text: String, readout: WritingReadout) in
                 let foreground = await MainActor.run { inForeground() }
@@ -1110,6 +1435,8 @@ enum WritingModel {
                 NSLog("FFWRITE used=0 kept-raw=all why=step-time-limit limit-ms=%.0f", budget * 1000)
                 result = raw(text, background: false, note: String(format: "time limit %.1f s", budget))
             }
+            CleanupSpeed.note(seconds: Date().timeIntervalSince(began))   // build 33: the cleanup step only
+            await MainActor.run { CleanupAsk.shared.check() }
         }
         await MainActor.run {
             WritingReadoutStore.shared.last = result.readout
@@ -1164,6 +1491,7 @@ enum WritingModel {
             let c = AppleWriter.check
             if c.available { return await AppleWriter.write(text, style: style, background: background, deadline: deadline) }
             NSLog("FFWRITE used=0 kept-raw=all why=unavailable %@", String(describing: AppleWriter.model.availability))
+            WriteDiagnostics.note(background ? "app-bg" : "app-fg", "unavailable", ["reason": c.reason ?? "-"])
             return raw(text, background: background, note: c.reason ?? "Apple Intelligence not available")
         }
         #endif
@@ -1187,135 +1515,24 @@ enum AppleWriterNotUsed {
 }
 
 #if canImport(FoundationModels)
-/// Apple's model writes into this one field (guided generation).
-@available(iOS 26.0, *)
-@Generable
-struct WrittenText {
-    @Guide(description: "The transcript rewritten in the requested style. Only the rewritten text.")
-    var text: String
-}
-
+/// Apple's model in the app: the writer itself is AppleRewrite in FreeFlowKit (shared with the keyboard).
 @available(iOS 26.0, *)
 enum AppleWriter {
-    static let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+    static var model: SystemLanguageModel { AppleRewrite.model }
     static var available: Bool { check.available }
-    /// Available, or why not in a few words (shown in Settings, at setup and in Where it runs).
-    static var check: (available: Bool, reason: String?) {
-        switch model.availability {
-        case .available: return (true, nil)
-        case .unavailable(let why):
-            switch why {
-            case .deviceNotEligible: return (false, "this device can't run Apple Intelligence")
-            case .appleIntelligenceNotEnabled: return (false, "Apple Intelligence is off in the Settings app")
-            case .modelNotReady: return (false, "Apple's model is still downloading")
-            @unknown default: return (false, "Apple's model is not available")
-            }
-        }
-    }
-    /// Kept so its prewarmed resources stay loaded; never used to write.
-    nonisolated(unsafe) private static var warmSession: LanguageModelSession?
-    static func prewarm() {
-        guard available else { return }
-        let s = LanguageModelSession(model: model, instructions: WritingPrompt.instructions(for: SharedSession.style))
-        s.prewarm()
-        warmSession = s
-    }
+    static var check: (available: Bool, reason: String?) { AppleRewrite.check }
+    static func prewarm() { AppleRewrite.prewarm(style: SharedSession.style) }
 
     static func write(_ text: String, style: DictationStyle, background: Bool, deadline: Date) async -> (text: String, readout: WritingReadout) {
-        let start = Date()
-        var out = "", used = 0, kept = 0, timedOut = 0, notUsed = ""
-        defer { AppleWriterNotUsed.put(notUsed.isEmpty ? nil : notUsed.trimmingCharacters(in: .whitespaces)) }
-        var reasons: [String] = []
-        func because(_ r: String) { if !reasons.contains(r) { reasons.append(r) } }
-        let instructions = WritingPrompt.instructions(for: style)
-        for piece in WritingGuard.pieces(text) {
-            guard piece.write else { out += piece.text; continue }
-            let budget = deadline.timeIntervalSinceNow
-            if budget < 0.05 { out += piece.text; kept += 1; timedOut += 1; continue }
-            let message = WritingPrompt.message(piece.text)
-            let words = piece.text.split(separator: " ").count
-            // Past the limit the request is cancelled and the piece goes in as heard.
-            let result = await Deadline.run(budget) { () -> Result<String, Error> in
-                do {
-                    // Build 16: guided generation. The answer is one text field, so there is no room for "Sure, here is".
-                    let session = LanguageModelSession(model: AppleWriter.model, instructions: instructions)
-                    let r = try await session.respond(to: message, generating: WrittenText.self, includeSchemaInPrompt: true,
-                                                      options: GenerationOptions(sampling: .greedy, maximumResponseTokens: max(300, words * 4)))
-                    return .success(r.content.text.trimmingCharacters(in: .whitespacesAndNewlines))
-                } catch { return .failure(error) }
-            }
-            switch result {
-            case .some(.success(let answer)):
-                if WritingGuard.leftOut(raw: piece.text, written: answer) {
-                    // Build 23 safety net (a long dictation came back cut in half): the answer lost a large
-                    // share of what was said, so this piece goes in as heard; both versions stay in Recent recordings.
-                    NSLog("FFWRITE piece kept-raw why=left-out words-in=%d words-out=%d", WritingReadout.words(piece.text), WritingReadout.words(answer))
-                    out += piece.text; kept += 1; because("Apple Intelligence left out words, so the text as heard was used")
-                    notUsed += answer + " "
-                } else if let why = WritingGuard.reject(raw: piece.text, written: answer) {
-                    NSLog("FFWRITE piece kept-raw why=%@", why); out += piece.text; kept += 1; because(why == "empty answer" ? "Apple Intelligence gave an empty answer" : "Apple Intelligence: " + why)
-                } else { out += answer; used += 1 }
-            case .some(.failure(let error)):
-                NSLog("FFWRITE piece kept-raw error=%@", String(describing: error)); out += piece.text; kept += 1; because(plain(error))
-            case .none:
-                NSLog("FFWRITE piece kept-raw why=time-limit"); out += piece.text; kept += 1; timedOut += 1
-            }
-        }
-        let seconds = Date().timeIntervalSince(start)
-        NSLog("FFWRITE used=%d kept-raw=%d timed-out=%d ms=%.0f words=%d style=%@ runtime=apple bg=%d", used, kept, timedOut,
-              seconds * 1000, text.split(separator: " ").count, style.rawValue, background ? 1 : 0)
-        if timedOut > 0 { because(String(format: "time limit %.1f s", deadline.timeIntervalSince(start))) }
-        let note = reasons.isEmpty ? nil : reasons.joined(separator: ", ")
-        return (out, WritingReadout(model: "Apple on-device model", runtime: "Apple Foundation Models", background: background,
-                                    wordsIn: WritingReadout.words(text), wordsOut: WritingReadout.words(out), seconds: seconds,
-                                    keptRaw: kept, note: note, used: used))
+        let o = await AppleRewrite.write(text, style: style, deadline: deadline, os: DictationEngine.SystemWords.os, tag: background ? "app-bg" : "app-fg")
+        AppleWriterNotUsed.put(o.notUsed.isEmpty ? nil : o.notUsed.trimmingCharacters(in: .whitespaces))
+        let note = o.reasons.isEmpty ? nil : o.reasons.joined(separator: ", ")
+        return (o.text, WritingReadout(model: "Apple on-device model", runtime: "Apple Foundation Models", background: background,
+                                       wordsIn: WritingReadout.words(text), wordsOut: WritingReadout.words(o.text), seconds: o.seconds,
+                                       keptRaw: o.kept, note: note, used: o.used))
     }
 
-    /// Why Apple's model gave no text for a piece, in a few plain words (the readout under the dictation).
-    static func plain(_ error: Error) -> String {
-        #if compiler(>=6.4)
-        // iOS 27 reports errors as LanguageModelError, with Apple's own reason (e.g. "May contain unsafe content").
-        if #available(iOS 27.0, *), let e = error as? LanguageModelError {
-            switch e {
-            case .refusal(let r): return "Apple Intelligence refused (" + r.debugDescription + ")"
-            case .guardrailViolation(let g): return "Apple Intelligence refused (" + g.debugDescription + ")"
-            case .rateLimited: return "Apple Intelligence rate-limited (\(DictationEngine.SystemWords.os) limits it in the background)"
-            case .contextSizeExceeded: return "too long for Apple Intelligence"
-            case .unsupportedLanguageOrLocale: return "language not supported by Apple Intelligence"
-            case .timeout: return "Apple Intelligence timed out"
-            case .unsupportedCapability, .unsupportedTranscriptContent, .unsupportedGenerationGuide:
-                return "Apple Intelligence can't take this request"
-            @unknown default: return "Apple Intelligence error (" + chain(error as NSError) + ")"
-            }
-        }
-        #endif
-        guard let e = error as? LanguageModelSession.GenerationError else { return "Apple Intelligence error (" + chain(error as NSError) + ")" }
-        switch e {
-        case .refusal, .guardrailViolation: return "Apple Intelligence refused"
-        case .rateLimited: return "Apple Intelligence rate-limited (\(DictationEngine.SystemWords.os) limits it in the background)"
-        case .concurrentRequests: return "Apple Intelligence busy"
-        case .assetsUnavailable: return "Apple's model not ready"
-        case .unsupportedLanguageOrLocale: return "language not supported by Apple Intelligence"
-        case .exceededContextWindowSize: return "too long for Apple Intelligence"
-        case .decodingFailure, .unsupportedGuide: return "Apple Intelligence answer unreadable"
-        @unknown default: return "Apple Intelligence error (" + chain(error as NSError) + ")"
-        }
-    }
-
-    /// An error Apple gives no case for, as its domains and codes, outermost first: e.g. the iOS 26.5 simulator's
-    /// "GenerationError -1, SensitiveContentAnalysisML 15, ModelManagerError 1001" (10-30), so the line says exactly
-    /// what failed.
-    static func chain(_ error: NSError) -> String {
-        var parts: [String] = [], queue = [error]
-        while !queue.isEmpty, parts.count < 4 {
-            let e = queue.removeFirst()
-            let p = (e.domain.split(separator: ".").last.map(String.init) ?? e.domain) + " \(e.code)"
-            if !parts.contains(p) { parts.append(p) }
-            if let u = e.userInfo[NSUnderlyingErrorKey] as? NSError { queue.append(u) }
-            if let us = e.userInfo[NSMultipleUnderlyingErrorsKey] as? [NSError] { queue.append(contentsOf: us) }
-        }
-        return parts.joined(separator: ", ")
-    }
+    static func plain(_ error: Error) -> String { AppleRewrite.plain(error, os: DictationEngine.SystemWords.os) }
 }
 #endif
 

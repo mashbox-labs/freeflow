@@ -1,11 +1,16 @@
 import AppKit
 import ApplicationServices
 import Carbon
+#if !FF_MAC_BRIDGE
+import FreeFlowKit   // the plug-in compiles LeadingSpace.swift into itself instead
+#endif
 
 /// Puts the finished text into the app you are in, at the cursor: the text goes on the clipboard, Free Flow presses
 /// Command-V for you, and then your own clipboard is put back as it was (unless something else copied in the
 /// meantime). The text is marked transient so clipboard managers skip it. Pressing keys in another app needs
 /// Accessibility; without it the text stays on the clipboard and the pill says so.
+/// Next build: one space first when the character before the cursor is readable and is not whitespace
+/// (LeadingSpace); when the app does not say, the text goes in as it is.
 enum TextInserter {
     enum Result: Equatable { case pasted, copied }
 
@@ -13,7 +18,8 @@ enum TextInserter {
     static let restoreAfter: UInt64 = 900_000_000
 
     @MainActor
-    static func insert(_ text: String) async -> Result {
+    static func insert(_ dictation: String) async -> Result {
+        let text = AXIsProcessTrusted() ? LeadingSpace.apply(before: characterBeforeCursor(), to: dictation) : dictation
         let pb = NSPasteboard.general
         let saved = snapshot(pb)
         pb.clearContents()
@@ -28,6 +34,43 @@ enum TextInserter {
         try? await Task.sleep(nanoseconds: restoreAfter)
         if pb.changeCount == ours { restore(saved, to: pb) }
         return .pasted
+    }
+
+    /// The character just before the cursor (or the selection) in the focused field of the app in front, through
+    /// Accessibility: AXSelectedTextRange, then AXStringForRange, else AXValue. nil when there is none (the cursor is at
+    /// the start) or the app does not expose it (a secure field, an app without the attributes, a timeout).
+    static func characterBeforeCursor() -> Character? {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.25)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let ref = focused, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let field = ref as! AXUIElement
+        AXUIElementSetMessagingTimeout(field, 0.25)
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(field, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rv = rangeRef, CFGetTypeID(rv) == AXValueGetTypeID() else { return nil }
+        var selection = CFRange()
+        guard AXValueGetValue(rv as! AXValue, .cfRange, &selection), selection.location > 0 else { return nil }
+        // Two UTF-16 units before the cursor, so a character made of a surrogate pair is read whole; its last one counts.
+        var range = CFRange(location: max(0, selection.location - 2), length: min(2, selection.location))
+        var text: String?
+        if let param = AXValueCreate(.cfRange, &range) {
+            var out: CFTypeRef?
+            if AXUIElementCopyParameterizedAttributeValue(field, kAXStringForRangeParameterizedAttribute as CFString, param, &out) == .success {
+                text = out as? String
+            }
+        }
+        if text == nil {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(field, kAXValueAttribute as CFString, &value) == .success, let all = value as? String {
+                let ns = all as NSString
+                if range.location + range.length <= ns.length {
+                    text = ns.substring(with: NSRange(location: range.location, length: range.length))
+                }
+            }
+        }
+        return text?.last
     }
 
     /// Every item on the clipboard with every type it offers, as data.

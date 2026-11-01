@@ -64,21 +64,42 @@ public enum ArmWindow {
     }
 }
 
-/// Build 23 (security): on the Mac, how long the mic stays on after a fn dictation. Build 22 kept it on for
-/// the session window (15 minutes) after every fn press. Default 0: on at fn down, off as soon as the text is in. A cold
-/// start measured 10-31 on the M5's built-in mic: AVAudioEngine.start 60-78 ms after the call, first buffer 166-184 ms
-/// (6 runs); the other choices keep it on between dictations.
+/// Build 23 (security): on the Mac, how long the mic stays on after a fn dictation.
+/// Build 26: "Keep mic ready" Always (while Free Flow runs, as on iPhone and iPad), 15, 5, 2 or Off, default Always;
+/// and the mic is the Mac's built-in one by default. Measured 10-31: a cold press on a Bluetooth headset heard nothing
+/// for 897-1035 ms (median 924, 5 presses) while the headset moved to call mode; the built-in mic cold 67-137 ms
+/// (6 starts); any mic kept ready 2-4 ms. A headset's mic kept on plays music in call quality (a2dp 0, hfp 1, 24 kHz);
+/// the built-in mic leaves the headset in music mode.
 public enum MacMic {
     public static let key = "macMicMinutes"
-    public static let choices = [0, 5, 15, 60]
-    public static let defaultMinutes = 0
+    /// Minutes; `always` = for as long as Free Flow runs.
+    public static let always = -1
+    public static let choices = [always, 15, 5, 2, 0]
+    public static let defaultMinutes = always
     public static func minutes(stored: Int?) -> Int { stored.flatMap { choices.contains($0) ? $0 : nil } ?? defaultMinutes }
     public static func releasesAfterDictation(stored: Int?) -> Bool { minutes(stored: stored) == 0 }
     public static func label(_ minutes: Int) -> String {
         switch minutes {
+        case always: return "Always (while Free Flow runs)"
         case 0: return "Off right after each dictation"
-        case 60: return "1 hour"
         default: return "\(minutes) minutes"
+        }
+    }
+
+    /// Build 26: the picked mic: `builtIn` (the default), `systemDefault` (follows Sound settings) or a CoreAudio uid.
+    public static let deviceKey = "macMicDevice"
+    public static let builtIn = "builtin"
+    public static let systemDefault = "default"
+    public static func picked(stored: String?) -> String { (stored?.isEmpty ?? true) ? builtIn : stored! }
+
+    /// The uid the Mac app records from through its own input unit, or "" for the system default input through the
+    /// audio session. A picked mic that is not connected (the built-in one with the lid closed, an unplugged one) falls
+    /// back to the system default.
+    public static func ownInput(picked: String, connected: [String], builtInUID: String?) -> String {
+        switch picked {
+        case systemDefault: return ""
+        case builtIn: return builtInUID.flatMap { connected.contains($0) ? $0 : nil } ?? ""
+        default: return connected.contains(picked) ? picked : ""
         }
     }
 }

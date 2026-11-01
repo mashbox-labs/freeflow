@@ -4,7 +4,9 @@ import XCTest
 final class AudioSessionSetupTests: XCTestCase {
     private final class Fake: AudioSessionConfiguring {
         var calls: [String] = []
-        func ffSetPlayAndRecord(mixWithOthers: Bool, duckOthers: Bool) throws { calls.append("category") }
+        func ffSetPlayAndRecord(mixWithOthers: Bool, duckOthers: Bool, bluetoothMic: Bool) throws {
+            calls.append("category"); if bluetoothMic { calls.append("hfp") }
+        }
         func ffSetAllowHapticsWhileRecording(_ on: Bool) throws { calls.append("haptics=\(on)") }
         func ffSetPrefersNoInterruptionsFromSystemAlerts(_ on: Bool) throws { calls.append("alerts=\(on)") }
         func ffSetActive(_ on: Bool) throws { calls.append("active=\(on)") }
@@ -21,6 +23,58 @@ final class AudioSessionSetupTests: XCTestCase {
         XCTAssertNotNil(h, "haptics allowed while recording: \(f.calls)")
         let c = f.calls.firstIndex(of: "category") ?? -1, a = f.calls.firstIndex(of: "active=true") ?? -1
         XCTAssertTrue(c < (h ?? -2) && (h ?? Int.max) < a, "order: \(f.calls)")
+    }
+}
+
+final class MicChoiceTests: XCTestCase {
+    let builtIn = MicChoice.Input(uid: "builtin", name: "iPad Microphone", isBluetooth: false, isBuiltIn: true)
+    let headset = MicChoice.Input(uid: "bt-1", name: "Headset", isBluetooth: true, isBuiltIn: false)
+    let usb = MicChoice.Input(uid: "usb-1", name: "USB Mic", isBluetooth: false, isBuiltIn: false)
+
+    /// Built-in is the default and the session stays A2DP (no hands-free) unless a Bluetooth mic is picked.
+    func testBuiltInIsTheDefaultAndKeepsFullQualityPlayback() throws {
+        XCTAssertEqual(MicChoice.preferred(saved: "", available: [headset, builtIn, usb]), builtIn)
+        XCTAssertFalse(MicChoice.needsHandsFree(saved: "", savedIsBluetooth: false))
+        let f = Fake()
+        try AudioSessionSetup.configure(f, mixWithOthers: true, duckOthers: false)
+        XCTAssertFalse(f.calls.contains("hfp"), "\(f.calls)")
+    }
+
+    func testABluetoothMicAddsHandsFree() throws {
+        XCTAssertTrue(MicChoice.needsHandsFree(saved: "bt-1", savedIsBluetooth: true))
+        XCTAssertFalse(MicChoice.needsHandsFree(saved: "usb-1", savedIsBluetooth: false))
+        let f = Fake()
+        try AudioSessionSetup.configure(f, mixWithOthers: true, duckOthers: false, bluetoothMic: true)
+        XCTAssertTrue(f.calls.contains("hfp"), "\(f.calls)")
+    }
+
+    func testAPickNotConnectedFallsBackToBuiltIn() {
+        XCTAssertEqual(MicChoice.preferred(saved: "bt-1", available: [builtIn]), builtIn)
+        XCTAssertEqual(MicChoice.preferred(saved: "bt-1", available: [builtIn, headset]), headset)
+    }
+
+    func testRowsListBuiltInFirstThenEveryInputOnceThenTheSavedPick() {
+        let rows = MicChoice.rows(available: [headset, builtIn, usb, headset], saved: "gone", savedName: "Old Headset")
+        XCTAssertEqual(rows.map(\.tag), ["", "bt-1", "usb-1", "gone"])
+        XCTAssertEqual(rows.first?.title, MicChoice.builtInTitle)
+        XCTAssertEqual(rows.last?.title, "Old Headset (not connected)")
+    }
+
+    func testNoteSaysCallQualityAndSlowerPlainly() {
+        XCTAssertTrue(MicChoice.note.contains("call-quality"))
+        XCTAssertTrue(MicChoice.note.contains("longer to start"))
+        XCTAssertNil(MicChoice.note.range(of: "AirPods"), "never names one headset")
+        for glyph in ["\u{2014}", "\u{2013}"] { XCTAssertFalse(MicChoice.note.contains(glyph)) }
+    }
+
+    private final class Fake: AudioSessionConfiguring {
+        var calls: [String] = []
+        func ffSetPlayAndRecord(mixWithOthers: Bool, duckOthers: Bool, bluetoothMic: Bool) throws {
+            calls.append("category"); if bluetoothMic { calls.append("hfp") }
+        }
+        func ffSetAllowHapticsWhileRecording(_ on: Bool) throws {}
+        func ffSetPrefersNoInterruptionsFromSystemAlerts(_ on: Bool) throws {}
+        func ffSetActive(_ on: Bool) throws {}
     }
 }
 

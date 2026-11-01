@@ -5,14 +5,13 @@ import UIKit
 
 /// The ways to start dictation. The user picks; setup then covers only those.
 enum DictationMethod: String, CaseIterable, Identifiable {
-    case keyboard, actionButton, backTap, controlCenter
+    case keyboard, actionButton, controlCenter   // build 32: no Back Tap (it needs a Shortcuts-app action)
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .keyboard: "The Free Flow keyboard"
         case .actionButton: "Action Button"
-        case .backTap: "Back Tap"
         case .controlCenter: "Control Center"
         }
     }
@@ -21,7 +20,6 @@ enum DictationMethod: String, CaseIterable, Identifiable {
         switch self {
         case .keyboard: "A mic key in every app, and a two-finger swipe: up starts, down finishes. The text goes straight into the box you're typing in."
         case .actionButton: "Press the Action Button to start and again to stop. With the Free Flow keyboard up, the text goes in at your cursor; otherwise it's copied, ready to paste."
-        case .backTap: "Double-tap the back of your iPhone to start and again to stop. With the Free Flow keyboard up, the text goes in at your cursor; otherwise it's copied, ready to paste."
         case .controlCenter: "A Free Flow button in Control Center or on the Lock Screen. Tap to start and again to stop. With the Free Flow keyboard up, the text goes in at your cursor; otherwise it's copied, ready to paste."
         }
     }
@@ -30,12 +28,11 @@ enum DictationMethod: String, CaseIterable, Identifiable {
         switch self {
         case .keyboard: "keyboard"
         case .actionButton: "button.vertical.right.press"
-        case .backTap: "hand.tap"
         case .controlCenter: "switch.2"
         }
     }
 
-    /// iPad has no Action Button and no Back Tap.
+    /// iPad has no Action Button.
     static var available: [DictationMethod] {
         UIDevice.current.userInterfaceIdiom == .phone ? allCases : [.keyboard, .controlCenter]
     }
@@ -424,12 +421,6 @@ struct OnboardingView: View {
                 SettingsPicture(title: "Action Button", back: "Settings",
                                 rows: [.plain("Controls"), .link("Choose a Control…", "Start/Stop Free Flow")], point: 1)
                 Text("Swipe sideways on the Action Button screen until it says Controls.").font(FFFont.text(15)).foregroundStyle(Palette.faint)
-            case .backTap:
-                PathPill("Shortcuts › + › Add Action › Free Flow › Start/Stop Free Flow, then Settings › Accessibility › Touch › Back Tap › Double Tap")
-                SettingsPicture(title: "Double Tap", back: "Back Tap",
-                                rows: [.plain("None"), .plain("Accessibility Shortcut"), .link("Start/Stop Free Flow", nil)], point: 2)
-                Text("Make the one-step shortcut first; it then shows near the bottom of Double Tap, under Shortcuts.")
-                    .font(FFFont.text(15)).foregroundStyle(Palette.faint)
             default:
                 PathPill("Control Center › + (top left) › Add a Control › search Free Flow › Start/Stop Free Flow")
                 SettingsPicture(title: "Add a Control", back: nil,
@@ -698,7 +689,7 @@ struct LogoNotice: View {
 }
 
 /// Setup's writer step (build 18: LFM3 is dropped, Apple Intelligence is the writer and it is optional): one
-/// switch, on by default, and where Apple Intelligence can't run here, the reason.
+/// switch, off by default since build 33, and where Apple Intelligence can't run here, the reason.
 struct WriterOfferPage: View {
     let deviceWord: String
     let next: () -> Void

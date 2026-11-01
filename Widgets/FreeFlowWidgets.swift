@@ -7,8 +7,7 @@ import WidgetKit
 @main
 struct FreeFlowWidgets: WidgetBundle {
     var body: some Widget {
-        DictateControl()
-        SessionControl()
+        DictateControl()   // build 31: the only control; the session control is gone
         DictationLiveActivity()
     }
 }
@@ -22,17 +21,6 @@ struct DictateControl: ControlWidget {
         }
         .displayName("Start/Stop Free Flow")
         .description("Press to dictate, press again to stop. Typed at your cursor with the Free Flow keyboard up, otherwise copied.")
-    }
-}
-
-/// Keep the mic session warm so the keyboard dictates without switching apps.
-struct SessionControl: ControlWidget {
-    var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "freeflow.control.session") {
-            ControlWidgetButton(action: StartSessionIntent()) { Label("Free Flow session", systemImage: "waveform") }
-        }
-        .displayName("Free Flow session")
-        .description("Keep the Free Flow keyboard ready to dictate.")
     }
 }
 

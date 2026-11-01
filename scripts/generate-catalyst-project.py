@@ -67,7 +67,7 @@ base = file_ref("Configuration/Base.xcconfig", "text.xcconfig")
 for rel, ftype in (("Catalyst/Info.plist", "text.plist.xml"), ("Catalyst/FreeFlowCatalyst.entitlements", "text.plist.entitlements"),
                    ("MacBridge/Info.plist", "text.plist.xml")):
     file_ref(rel, ftype)
-COMMON = 'SWIFT_VERSION = 5.0; MARKETING_VERSION = 1.1; CURRENT_PROJECT_VERSION = 25; CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; CODE_SIGN_IDENTITY = ""; '
+COMMON = 'SWIFT_VERSION = 5.0; MARKETING_VERSION = 1.1; CURRENT_PROJECT_VERSION = 27; CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; CODE_SIGN_IDENTITY = ""; '
 
 
 def config_list(key: str, settings: str) -> str:
@@ -117,6 +117,7 @@ def swift_files(*dirs: str) -> list[str]:
 bridge, bridge_product = target(
     "bridge", "FreeFlowMacBridge", "com.apple.product-type.bundle", "FreeFlowMacBridge.bundle", "wrapper.cfbundle",
     swift_files("MacBridge") + ["Packages/FreeFlowKit/Sources/FreeFlowKit/FnGesture.swift",
+                                "Packages/FreeFlowKit/Sources/FreeFlowKit/LeadingSpace.swift",
                                 "Mac/FnKeyMonitor.swift", "Mac/TextInserter.swift", "Mac/AudioDevices.swift"], [], [],
     'SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 15.0; ARCHS = arm64; PRODUCT_NAME = FreeFlowMacBridge; '
     'PRODUCT_BUNDLE_IDENTIFIER = "$(FF_BUNDLE_PREFIX).freeflow.mac.bridge"; INFOPLIST_FILE = MacBridge/Info.plist; GENERATE_INFOPLIST_FILE = NO; '

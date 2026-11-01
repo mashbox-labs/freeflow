@@ -115,7 +115,9 @@ keyboard, keyboard_product = native_target(
     "keyboard", "FreeFlowKeyboard", "com.apple.product-type.app-extension", "FreeFlowKeyboard.appex", "wrapper.app-extension", "Keyboard",
     [("Keyboard/PrivacyInfo.xcprivacy", "text.xml")] + WORDLIST + WORDLIST_NOTICES, ["FreeFlowKit"],
     'PRODUCT_NAME = FreeFlowKeyboard; PRODUCT_BUNDLE_IDENTIFIER = "$(FF_BUNDLE_PREFIX).freeflow.keyboard"; INFOPLIST_FILE = Keyboard/Info.plist; '
-    'CODE_SIGN_ENTITLEMENTS = Keyboard/Keyboard.entitlements; ' + EXT)
+    'CODE_SIGN_ENTITLEMENTS = Keyboard/Keyboard.entitlements; '
+    # Build 28: the keyboard runs Apple's model (FoundationModels, iOS 26+); weak so it still loads on iOS 18.
+    'OTHER_LDFLAGS = "$(inherited) -weak_framework FoundationModels"; ' + EXT)
 widgets, widgets_product = native_target(
     "widgets", "FreeFlowWidgets", "com.apple.product-type.app-extension", "FreeFlowWidgets.appex", "wrapper.app-extension", "Widgets",
     [("Widgets/PrivacyInfo.xcprivacy", "text.xml")], ["FreeFlowKit"],

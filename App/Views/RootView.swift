@@ -8,6 +8,7 @@ struct RootView: View {
     /// Whether setup shows, seeded from the saved flag and set directly when setup ends, so the switch never
     /// depends on reading the saved value back.
     @State private var showSetup: Bool?
+    @ObservedObject private var cleanupAsk = CleanupAsk.shared
 
     var body: some View {
         // Setup or the app, chosen at the root. A full-screen cover set at launch could be dropped (seen on
@@ -22,6 +23,11 @@ struct RootView: View {
         .onChange(of: onboarded) { _, done in showSetup = !done }   // Settings > Show setup again
         .preferredColorScheme(Look.scheme(appearance))
         .tint(Palette.brand)
+        // Build 33: cleanup is slow on this device; one tap turns it off.
+        .alert(CleanupSpeed.question, isPresented: Binding(get: { cleanupAsk.asking }, set: { if !$0 { cleanupAsk.asking = false } })) {
+            Button("Turn off cleanup") { cleanupAsk.answer(turnOff: true) }
+            Button("Keep it", role: .cancel) { cleanupAsk.answer(turnOff: false) }
+        }
     }
 
     /// The Mac tests open on a given tab for screenshots (FF_MAC_TEST=1 FF_MAC_TAB=history); otherwise Dictate.

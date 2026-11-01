@@ -1,9 +1,9 @@
 import Foundation
 
 /// Who writes dictations (build 18, 2026-10-30: LFM3 is dropped; Apple Intelligence works well, and the app must also
-/// work for people who do not have it on): Apple's
-/// on-device model, optional, on unless the person turns it off in Settings › Writing or at setup. Where Apple
-/// Intelligence cannot run, the text goes in as heard and the app says why.
+/// work for people who do not have it on): Apple's on-device model, optional. Build 33: off unless the person turns it
+/// on at setup or in Settings › Writing; a choice already stored is kept. Where Apple Intelligence cannot run, the text
+/// goes in as heard and the app says why.
 public enum WriterChoice: String, CaseIterable, Identifiable, Sendable {
     case apple, off
     public var id: String { rawValue }
@@ -22,11 +22,11 @@ public enum WriterChoice: String, CaseIterable, Identifiable, Sendable {
         set { UserDefaults.standard.set(newValue?.rawValue, forKey: key) }
     }
 
-    /// The stored choice, else on (Apple Intelligence).
+    /// The stored choice, else off (build 33).
     public static var resolved: WriterChoice { resolved(raw: UserDefaults.standard.string(forKey: key)) }
 
     /// The same from a stored raw value ("" or nil = not picked), for views that keep it in @AppStorage.
-    public static func resolved(raw: String?) -> WriterChoice { raw.flatMap(WriterChoice.init(rawValue:)) ?? .apple }
+    public static func resolved(raw: String?) -> WriterChoice { raw.flatMap(WriterChoice.init(rawValue:)) ?? .off }
 
     /// The Settings line: who writes and in what state. `reason`: why Apple's model cannot run here, in a few words.
     public static func status(choice: WriterChoice, appleAvailable: Bool, reason: String? = nil) -> (name: String, state: String) {

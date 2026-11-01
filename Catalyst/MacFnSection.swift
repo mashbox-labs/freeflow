@@ -18,15 +18,25 @@ struct MacFnSection: View {
                 Text(note).font(FFFont.text(14)).foregroundStyle(Palette.warn)
                 Button("Open Keyboard settings") { MacHost.shared.openSettings("keyboard") }
             }
-            LabeledContent("Microphone", value: mac.micName.isEmpty ? "None found" : mac.micName)
+            // Build 26: the mic picker, here and in the menu-bar menu.
+            Picker("Microphone", selection: Binding(get: { mac.picked }, set: { MacHost.shared.pick($0) })) {
+                if mac.builtInUID != nil { Text("Built-in microphone").tag(MacMic.builtIn) }
+                Text("System default input" + (mac.micName.isEmpty ? "" : " (\(mac.micName))")).tag(MacMic.systemDefault)
+                ForEach(mac.inputs.filter { $0.kind != "builtin" }) { input in Text(mac.label(input)).tag(input.uid) }
+                if ![MacMic.builtIn, MacMic.systemDefault].contains(mac.picked), !mac.inputs.contains(where: { $0.uid == mac.picked }) {
+                    Text("Not connected: using the system default input").tag(mac.picked)
+                }
+            }
+            .accessibilityIdentifier("macMicDevice")
+            LabeledContent("Recording from", value: mac.micInUse)
             Button("Sound settings") { MacHost.shared.openSettings("sound") }
         }
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .onAppear { MacHost.shared.refresh() }
-        // Build 23 (F2): the Session picker on the Mac.
+        // Build 23: the Session picker on the Mac.
         Section("Session") {
-            Picker("Mic after fn", selection: $micMinutes) {
+            Picker("Keep mic ready", selection: $micMinutes) {
                 ForEach(MacMic.choices, id: \.self) { Text(MacMic.label($0)).tag($0) }
             }
             .accessibilityIdentifier("macMicMinutes")
@@ -38,12 +48,12 @@ struct MacFnSection: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         Section { EmptyView() } footer: {
-            Text("Off right after each dictation: the mic turns on when you press fn and off once your words are in, so the orange dot shows only while you talk. A longer time keeps it on between dictations.")
+            Text("Keep mic ready: the mic stays on, so a press of fn starts at once. macOS shows the orange dot while it is on. Off: the mic turns on at fn and off once your words are in. A Bluetooth headset's mic is slower to start and plays music in call quality while it is on; the built-in microphone leaves your headphones' music as it is.")
                 .font(FFFont.text(14))
         }
         .listSectionSeparator(.hidden)
         Section { EmptyView() } footer: {
-            Text("Hold fn and talk, let go to type it. Press fn twice for hands-free, then fn again to stop. Esc cancels. Free Flow records from the Mac's default input; change it in Sound settings.")
+            Text("Hold fn and talk, let go to type it. Press fn twice for hands-free, then fn again to stop. Esc cancels. Pick the microphone above or in the menu-bar menu; System default follows Sound settings.")
                 .font(FFFont.text(14))
         }
         .listSectionSeparator(.hidden)

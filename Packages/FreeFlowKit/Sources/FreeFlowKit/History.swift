@@ -39,6 +39,12 @@ public final class HistoryStore: ObservableObject, @unchecked Sendable {
         save()
     }
 
+    /// Changes one item in place (build 28: the keyboard's written text replaces the heard text it was saved with).
+    public func update(_ id: UUID, _ change: (inout HistoryItem) -> Void) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        change(&items[i]); save()
+    }
+
     public func remove(_ ids: Set<UUID>) { items.removeAll { ids.contains($0.id) }; save() }
     public func clear() { items = []; save() }
 

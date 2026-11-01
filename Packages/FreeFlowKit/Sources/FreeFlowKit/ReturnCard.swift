@@ -1,9 +1,10 @@
 import Foundation
 
-/// The "Recording. Go back to your app" card (build 10, option A, 2026-10-30).
+/// The "Go back to your app" card (build 10, option A). Build 26 (ColdStart): Free Flow turns the mic on here but
+/// records only once you are back in your app.
 ///
 /// A keyboard cannot use the microphone, so with no warm session the Free Flow keyboard's mic opens Free Flow with
-/// freeflow://dictate and Free Flow records there. Apple gives no public way to send a person back to the app they were
+/// freeflow://dictate; the keyboard starts the dictation when it shows again in your app. Apple gives no public way to send a person back to the app they were
 /// typing in, so the app shows one full-screen card that points at iOS's own back button at the top left and names the
 /// bottom-edge swipe. After that first trip the session is warm and the keyboard records in place (ArmWindow).
 ///
@@ -33,7 +34,7 @@ public struct ReturnCard: Equatable, Sendable {
         }
     }
 
-    /// Whether the card covers Free Flow now: while the mic starts and while it records.
+    /// Whether the card covers Free Flow now: while the mic starts and while it waits for you to go back.
     public func shows(phase: SessionPhase) -> Bool {
         guard armed else { return false }
         switch phase {
@@ -42,14 +43,21 @@ public struct ReturnCard: Equatable, Sendable {
         }
     }
 
-    /// "Recording" only once the mic really records; the second or so before that says "Starting".
-    public static func title(_ phase: SessionPhase) -> String { phase == .listening ? "Recording" : "Starting" }
+    /// "Go back" once the mic is on and waiting; "Starting" while it turns on; "Recording" only if it really records.
+    public static func title(_ phase: SessionPhase) -> String {
+        switch phase {
+        case .listening: return "Recording"
+        case .ready: return "Go back"
+        default: return "Starting"
+        }
+    }
 
     /// The card's words (no-ai-smell: short, plain, no dashes; never "Dictate" or "Ready").
     public enum Words {
         public static let head = "Go back to your app"
         public static let how = "Tap its name at the top left, or swipe right along the bottom edge."
-        public static let finish = "Finish from the keyboard."
+        /// Build 26: nothing is recorded here; the keyboard says when it listens.
+        public static let finish = "Free Flow listens once you are back. Speak when your keyboard says Listening."
         public static let stay = "Stay here"
         /// What VoiceOver reads for the card.
         public static func spoken(_ phase: SessionPhase) -> String { "\(title(phase)). \(head). \(how) \(finish)" }

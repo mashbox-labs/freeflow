@@ -60,3 +60,28 @@ enum AudioDevices {
         return n as String
     }
 }
+
+/// Build 26: the mic picker (Settings and the menu-bar menu) names devices by their CoreAudio UID, which stays the same
+/// across reconnects and restarts; the ID does not.
+extension AudioDevices {
+    static func uid(_ id: AudioDeviceID) -> String {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal,
+                                           mElement: kAudioObjectPropertyElementMain)
+        var uid: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &a, 0, nil, &size, &uid) == noErr, let u = uid?.takeRetainedValue() else { return "" }
+        return u as String
+    }
+
+    static func device(uid: String) -> AudioDeviceID? { inputs().first { self.uid($0) == uid } }
+
+    /// "builtin", "bluetooth", "usb" or "other".
+    static func kind(_ id: AudioDeviceID) -> String {
+        switch transport(id) {
+        case kAudioDeviceTransportTypeBuiltIn: return "builtin"
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: return "bluetooth"
+        case kAudioDeviceTransportTypeUSB: return "usb"
+        default: return "other"
+        }
+    }
+}

@@ -51,6 +51,7 @@ Pinned in App/Resources/model-manifest.json; every file is checked against its s
 | Parakeet Redux (Moondream, from NVIDIA Parakeet TDT 0.6B v3), Core ML by FluidInference | FluidInference/parakeet-redux-coreml @ 8c5ef97a29 (full sha in manifest) | CC-BY-4.0 (model card) |
 | Underdog Bark 3.0 Clean (Conway Research), Core ML by FluidInference | FluidInference/bark-3.0-coreml @ 73b0c0da66 (full sha in manifest), folder bark-3.0-clean | CC-BY-4.0 (model card); NOTICE downloaded with it and in ThirdParty/Models |
 | Underdog Bark 3.0 Pro (Conway Research), Core ML by Conway Research | ConwayResearch/Underdog-Bark-3.0-Pro @ 4b5c51e04a (full sha in manifest), folder coreml | CC-BY-4.0 (model card); LICENSE and NOTICE downloaded with it, NOTICE in ThirdParty/Models |
+| Whisper large-v3-turbo (OpenAI), Core ML for the Neural Engine by MASHBOX Labs (the default Whisper) | mashbox-labs/whisper-large-v3-turbo-coreml-ane @ de87901cec84f4e7e1ab8f2b2f5dab629fde05d3 | MIT (repository card) |
 | Whisper large-v3-turbo (OpenAI), Core ML by Argmax | argmaxinc/whisperkit-coreml @ 0f63a7800b00dd0226abd051b906c246e1907482, folder openai_whisper-large-v3-v20240930_turbo_632MB | MIT (repository card) |
 | Whisper large-v3-turbo tokenizer (OpenAI) | openai/whisper-large-v3-turbo @ revision in manifest | MIT (repository card) |
 | Parakeet TDT 0.6B v3 (NVIDIA), GGUF Q4_0 / Q4_K / Q8_0 by ggml-org (C++ backup) | ggml-org/parakeet-GGUF @ 35156454d1 (full sha in manifest) | Repository card: MIT. Weights: NVIDIA, CC-BY-4.0, "parakeet-tdt-0.6b-v3" |

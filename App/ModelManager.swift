@@ -1,6 +1,7 @@
 import CryptoKit
 import FluidAudio
 import FreeFlowKit
+import WhisperKit
 import Foundation
 import UIKit
 
@@ -34,6 +35,106 @@ final class ModelManager: ObservableObject {
             }
         }
     }
+    // MARK: Routing by language
+    // English and Parakeet's other 24 languages dictate on Parakeet; every other language (Thai, Korean, Japanese,
+    // Chinese, ...) and Automatic dictate on Whisper. Models > Use picks WHICH Parakeet and WHICH Whisper; the language
+    // in Settings picks between them (SpeechRouting in FreeFlowKit).
+
+    /// The person's pick per engine ("pick.parakeet-v3", "pick.whisperkit"), so a language change and back returns to
+    /// the same models.
+    @Published private(set) var enginePicks: [SpeechModel.Engine: String] = [:]
+    /// The model the language needs that is not on this device yet (Settings offers its download); nil when the
+    /// routed model is ready or there is nothing to route to.
+    @Published private(set) var routedMissing: String?
+
+    /// The Whisper model the routing uses when none is picked: the first in the catalog this device can run.
+    static var whisperModel: SpeechModel? {
+        ModelCatalog.all.first { $0.engine.isWhisper && $0.fits(memoryBytes: DeviceProfile.current.memoryBytes) }
+    }
+    /// Every language Settings offers: Parakeet's 25, plus Whisper's full set when a Whisper model exists.
+    static var routableLanguages: Set<String> {
+        SpeechRouting.languages(parakeet: ModelCatalog.parakeetLanguages, whisper: whisperModel == nil ? nil : Constants.languageCodes)
+    }
+    /// The language setting as the routing reads it (Settings: device language by default); nil = Automatic.
+    static func routedLanguage() -> String? {
+        SpeechLanguage.pinned(stored: UserDefaults.standard.string(forKey: SpeechLanguage.key), preferred: Locale.preferredLanguages,
+                              supported: routableLanguages, automaticAllowed: whisperModel != nil)
+    }
+    func whisperID() -> String? { enginePicks[.whisperKit].flatMap { ModelCatalog.model($0)?.id } ?? Self.whisperModel?.id }
+    func parakeetID() -> String {
+        enginePicks[.parakeetV3].flatMap { ModelCatalog.model($0)?.id }
+            ?? (ModelCatalog.model(activeID)?.engine == .parakeetV3 ? activeID : recommended.id)
+    }
+    /// The model the current language dictates on.
+    func routedID() -> String {
+        SpeechRouting.modelID(language: Self.routedLanguage(), parakeet: parakeetID(), whisper: whisperID(),
+                              parakeetLanguages: ModelCatalog.parakeetLanguages)
+    }
+    /// Models > Use: the pick for that model's engine, then the language decides which engine runs. A C++ model is
+    /// picked outright (the fallback engine, as before).
+    func choose(_ id: String) {
+        guard let model = ModelCatalog.model(id) else { return }
+        if model.engine.isCpp { activeID = id; return }
+        let slot = Self.slot(model.engine)
+        enginePicks[slot] = id
+        UserDefaults.standard.set(id, forKey: "pick.\(slot.rawValue)")
+        if model.engine == .parakeetV3 { pinLanguageForParakeet() }
+        // 2026-11-03: Use always switches to that model; the person's pick wins over the language routing.
+        if status[id] == .ready { routedMissing = nil; if activeID != id { activeID = id } else { Task { try? await self.ensureLoaded() } } }
+        // A pinned language the model can't speak: one popup that fixes it in one tap (Automatic), never a dead end.
+        if let language = Self.routedLanguage(), !Transcriber.languages(of: id).contains(language) {
+            let name = Locale.current.localizedString(forLanguageCode: language) ?? language
+            languageConflict = "\(model.name) doesn't speak \(name), your language setting. Switch the language to Automatic?"
+        } else {
+            languageConflict = nil
+        }
+    }
+    /// Build 38: a Parakeet pick never lands on Automatic, which routes to Whisper: the language becomes this
+    /// device's language when Parakeet speaks it, else English (changeable in Settings). A pinned language stays.
+    func pinLanguageForParakeet() {
+        let stored = UserDefaults.standard.string(forKey: SpeechLanguage.key)
+        guard Self.routedLanguage() == nil else { return }
+        let device = ModelCatalog.currentLanguage
+        let pin = ModelCatalog.parakeetLanguages.contains(device) ? device : "en"
+        NSLog("FFMODEL Parakeet picked with Automatic (stored %@): language set to %@", stored ?? "none", pin)
+        UserDefaults.standard.set(pin, forKey: SpeechLanguage.key)
+        reroute()
+    }
+    /// The first-run cards: Parakeet pins the language as above; Whisper puts it back on Automatic (it detects).
+    func setupLanguage(for id: String) {
+        guard let engine = ModelCatalog.model(id)?.engine else { return }
+        if engine == .parakeetV3 { pinLanguageForParakeet() }
+        else if engine.isWhisper { UserDefaults.standard.set(SpeechLanguage.automatic, forKey: SpeechLanguage.key); reroute() }
+    }
+    /// The popup Models shows after Use when the language setting is one the picked model can't speak.
+    @Published var languageConflict: String?
+    func setLanguageAutomatic() {
+        UserDefaults.standard.set(SpeechLanguage.automatic, forKey: SpeechLanguage.key)
+        languageConflict = nil
+    }
+    /// Applies the language's routing: the routed model becomes the pick when it is on this device; otherwise the pick
+    /// stays (an unknown language then dictates in English on Parakeet) and Settings offers the download.
+    func reroute() {
+        let id = routedID()
+        if status[id] == .ready {
+            routedMissing = nil
+            if activeID != id { activeID = id }
+        } else {
+            routedMissing = id
+        }
+    }
+    /// Both Whisper runtimes share one pick slot (.whisperKit): the language routes to "the Whisper model".
+    static func slot(_ engine: SpeechModel.Engine) -> SpeechModel.Engine { engine.isWhisper ? .whisperKit : engine }
+    private func loadEnginePicks() {
+        for engine in [SpeechModel.Engine.parakeetV3, .whisperKit] {
+            if let id = UserDefaults.standard.string(forKey: "pick.\(engine.rawValue)"), let m = ModelCatalog.model(id), Self.slot(m.engine) == engine {
+                enginePicks[engine] = id
+            }
+        }
+        // The saved pick from a build without routing is this engine's pick.
+        if let engine = ModelCatalog.model(activeID)?.engine, !engine.isCpp, enginePicks[Self.slot(engine)] == nil { enginePicks[Self.slot(engine)] = activeID }
+    }
+
     /// Loads in flight: model id -> when it began. Dictate and Models show them ("Loading on the Neural Engine…", then
     /// the one-time build with its time).
     @Published private(set) var building: [String: Date] = [:] {
@@ -131,7 +232,15 @@ final class ModelManager: ObservableObject {
         let memory = DeviceProfile.current.memoryBytes
         let savedID = UserDefaults.standard.string(forKey: "activeModel")
         let saved = savedID.flatMap(ModelCatalog.model)
-        activeID = (saved?.fits(memoryBytes: memory) == true ? saved : nil)?.id ?? ModelCatalog.recommended(memoryBytes: memory).id
+        // Build 37: a new install (no pick, no model checked here) starts on the first-run screen's preselected model.
+        let fresh = (savedID ?? "").isEmpty && !defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("verified.") }
+        let firstRun = fresh ? ModelCatalog.setupChoices(memoryBytes: memory).first : nil
+        activeID = (saved?.fits(memoryBytes: memory) == true ? saved : nil)?.id ?? firstRun?.id ?? ModelCatalog.recommended(memoryBytes: memory).id
+        // Build 38: a new install starts on Parakeet, so its language is pinned the same way (never Automatic -> Whisper).
+        if fresh, ModelCatalog.model(activeID)?.engine == .parakeetV3, UserDefaults.standard.string(forKey: SpeechLanguage.key) == nil {
+            let device = ModelCatalog.currentLanguage
+            UserDefaults.standard.set(ModelCatalog.parakeetLanguages.contains(device) ? device : "en", forKey: SpeechLanguage.key)
+        }
         // Build 23: models this build no longer offers. Their files go from this device (once), and a pick of one moves
         // to the default with one line on Dictate.
         let removedHere = Self.removeDroppedModels()
@@ -156,6 +265,30 @@ final class ModelManager: ObservableObject {
             crashNotice = CppCrashGuard.notice(for: crash, fallbackName: ModelCatalog.model(activeID)?.name ?? activeID)
         }
         Self.cleanStaleCaches()
+        // Routing by language (2026-11-02): the saved pick is kept for its engine; the language decides which runs.
+        // didSet does not run inside init, so the moved pick is saved by hand (and loads on the first dictation).
+        loadEnginePicks()
+        let routed = routedID()
+        // 2026-11-03: the pick the person made stays at launch; the routing moves it only when it is not ready here.
+        if status[routed] == .ready, activeID != routed, status[activeID] != .ready {
+            NSLog("FFMODEL routed by language to %@ (pick was %@)", routed, activeID)
+            activeID = routed
+            UserDefaults.standard.set(activeID, forKey: "activeModel")
+        } else if status[routed] != .ready {
+            routedMissing = routed
+        }
+        // 2026-11-03 (build 34): a pick that is not on this device (a hidden model, a
+        // download that never finished) never blocks dictation while another Core ML model is ready here: the Parakeet
+        // pick first, then any Parakeet, then any ready Core ML model this device can run. Home says what is missing.
+        if status[activeID] != .ready {
+            let ready = ModelCatalog.all.filter { !$0.engine.isCpp && status[$0.id] == .ready && $0.fits(memoryBytes: memory) }
+            let parakeet = parakeetID()
+            if let next = ready.first(where: { $0.id == parakeet }) ?? ready.first(where: { $0.engine == .parakeetV3 }) ?? ready.first {
+                NSLog("FFMODEL pick %@ is not on this device: dictation uses %@", activeID, next.id)
+                activeID = next.id
+                UserDefaults.standard.set(activeID, forKey: "activeModel")
+            }
+        }
         #if !targetEnvironment(macCatalyst)
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
@@ -325,13 +458,17 @@ final class ModelManager: ObservableObject {
     /// A failed or partial download never touches the model in use or an older copy of this one.
     func download(_ model: SpeechModel) async {
         guard await fetch(model.id) else { if pickWhenReady == model.id { pickWhenReady = nil }; return }
-        if pickWhenReady == model.id { pickWhenReady = nil; activeID = model.id; return }    // picked: loads now
+        if pickWhenReady == model.id { pickWhenReady = nil; choose(model.id); return }       // picked: loads now (routing permitting)
+        // The model a language was waiting for (Settings > Language): routed to now that it is here.
+        if routedMissing == model.id { reroute(); if activeID == model.id { return } }
         // Nothing usable yet (first run, or the pick is still a download away): the model just verified is used.
         // A C++ model is used only when picked (Use); Core ML stays the automatic choice.
         if !activeReady, !model.engine.isCpp, model.fits(memoryBytes: device.memoryBytes) { activeID = model.id }   // loads now
         // Build 22: the one-time Neural Engine build starts right after the download, not at a dictation.
         else if activeID == model.id { Task { try? await self.ensureLoaded() } }
-        else { Task { await self.prepareBuild(model.id) } }
+        // 2026-11-03: a Whisper model the language does not route to yet is built on its first use (with the Preparing
+        // line), not now: its build would let the Parakeet in use go for minutes and keep the phone busy.
+        else if !model.engine.isWhisper { Task { await self.prepareBuild(model.id) } }
     }
 
     /// The first Neural Engine load of each Core ML model, measured once on a Mac (Apple M5, 2026-10-31, one cold load

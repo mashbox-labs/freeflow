@@ -14,6 +14,13 @@
       "maker": "Conway Research",
       "makerLogo": null,
       "blurb": "Conway Research's English post-trainings of Parakeet: Clean leaves out “um” and false starts, Pro writes every word."
+    },
+    {
+      "id": "whisper",
+      "name": "Whisper",
+      "maker": "OpenAI",
+      "makerLogo": "logo-openai",
+      "blurb": "OpenAI's Whisper on the Neural Engine (Core ML by Argmax): 99 languages, and it leaves out most “um”s and false starts on its own."
     }
   ],
   "models": [
@@ -197,6 +204,53 @@
       "dictionary": false,
       "purpose": "Lowest English error rate in its maker's tests · English",
       "family": "Underdog Bark 3.0"
+    },
+    {
+      "id": "whisper-turbo-ane",
+      "tier": "large",
+      "name": "Whisper large-v3-turbo (Neural Engine)",
+      "maker": "OpenAI",
+      "makerLogo": "logo-openai",
+      "parameters": "809M",
+      "languages": "99 languages",
+      "languageCodes": null,
+      "licence": "MIT",
+      "runtime": "Core ML",
+      "engine": "whisper-ane",
+      "downloadBytes": 963845734,
+      "minMemoryGiB": 5.0,
+      "recommendFromGiB": 7.0,
+      "preference": 3,
+      "blurb": "Our own Core ML build of OpenAI's Whisper large-v3-turbo for the Neural Engine: length buckets instead of a fixed 30-second window, 8-bit palettized weights. Used for the languages Parakeet does not cover (Thai, Korean, Japanese, Chinese and more).",
+      "quality": null,
+      "group": "whisper",
+      "quant": "8-bit palettized (16-row groups)",
+      "simSpeed": null,
+      "dictionary": false,
+      "purpose": "Languages Parakeet lacks"
+    },
+    {
+      "id": "large",
+      "tier": "large",
+      "name": "Whisper large-v3-turbo",
+      "maker": "OpenAI",
+      "makerLogo": "logo-openai",
+      "parameters": "809M",
+      "languages": "99 languages",
+      "languageCodes": null,
+      "licence": "MIT",
+      "runtime": "Core ML",
+      "engine": "whisperkit",
+      "downloadBytes": 648662093,
+      "minMemoryGiB": 7.0,
+      "recommendFromGiB": 7.0,
+      "preference": 2,
+      "blurb": "The widest language coverage at high accuracy.",
+      "quality": null,
+      "group": "whisper",
+      "quant": "4 and 6-bit palettized",
+      "simSpeed": null,
+      "dictionary": false
     },
     {
       "id": "parakeet-gguf-q4_0",

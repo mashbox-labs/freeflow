@@ -6,7 +6,8 @@ import XCTest
 final class ModelsPageTests: XCTestCase {
     func testSectionsHoldEveryModelOnce() {
         let sections = ModelCatalog.sections()
-        XCTAssertEqual(sections.map(\.id), ["parakeet", "bark"])
+        XCTAssertEqual(sections.map(\.id), ["parakeet", "bark", "whisper"])
+        XCTAssertEqual(sections[2].models.map(\.id), ["whisper-turbo-ane"])   // 11-03: only ours ("large" hidden)
         XCTAssertEqual(sections[1].models.map(\.id), ["bark-3.0-clean", "bark-3-pro"])
         let ids = sections.flatMap { $0.models.map(\.id) }
         XCTAssertEqual(ids.count, ModelCatalog.all.count)
@@ -42,6 +43,8 @@ final class ModelsPageTests: XCTestCase {
     /// Clean yes; Ultra, Redux and Bark 3.0 Pro no; the C++ engine has no boost.
     func testDictionaryOnlyWhereMeasured() {
         XCTAssertEqual(ModelCatalog.all.filter(\.usesDictionary).map(\.id), ["phonon-2", "bark-3.0-clean"])
+        // Whisper large-v3-turbo (11-01): its prompt is not yet measured to fix a word, so no label and no words.
+        XCTAssertEqual(ModelCatalog.model("whisper-turbo-ane")?.usesDictionary, false)
         XCTAssertEqual(ModelCatalog.model("phonon-2")?.purpose, "Fastest · English")
     }
 

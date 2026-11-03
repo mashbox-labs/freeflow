@@ -24,8 +24,10 @@ struct ModelsView: View {
         let word = DeviceWord.current
         Page {
             storageCard(word: word)
-            // Build 23: a device language the Parakeet models don't speak transcribes in English for now.
-            if SpeechLanguage.deviceDefault(preferred: Locale.preferredLanguages, supported: ModelCatalog.parakeetLanguages) == nil {
+            // Build 23: a device language no model here speaks transcribes in English for now (build 26: with
+            // Whisper back, any of its 99 languages counts).
+            if SpeechLanguage.deviceDefault(preferred: Locale.preferredLanguages,
+                                            supported: Set(ModelCatalog.all.flatMap { Transcriber.languages(of: $0.id) })) == nil {
                 Text("Your language is coming soon. Until then Free Flow transcribes in English.")
                     .font(FFFont.text(15)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("languageComingSoon")
@@ -45,6 +47,10 @@ struct ModelsView: View {
         }
         .accessibilityIdentifier("modelsPage")
         .navigationTitle("Models")
+        .alert("Language", isPresented: Binding(get: { models.languageConflict != nil }, set: { if !$0 { models.languageConflict = nil } })) {
+            Button("Use Automatic") { models.setLanguageAutomatic() }.accessibilityIdentifier("conflict.automatic")
+            Button("Keep my language", role: .cancel) {}
+        } message: { Text(models.languageConflict ?? "") }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -404,7 +410,7 @@ struct ModelCard: View {
             } else if inUse {
                 tag("In use", fill: Palette.bg, ink: Palette.ok)
             } else if models.activeID != model.id {
-                Button("Use") { models.activeID = model.id }.buttonStyle(CompactPill(primary: false))
+                Button("Use") { models.choose(model.id) }.buttonStyle(CompactPill(primary: false))
                     .accessibilityIdentifier("use.\(model.id)")
             }
         case .failed:
@@ -566,6 +572,134 @@ struct ModelPicker: View {
     }
 }
 
+/// Build 38: the first-run choice, always two cards: Parakeet Ultra first (recommended, preselected), then our
+/// Whisper (or, under 5 GiB, the best smaller model that fits). The language point is made in one line above the cards.
+/// Every line is true: Whisper large-v3-turbo covers 99 languages with its own language detection; its first use builds it
+/// for this device's Neural Engine once (about 1-2 minutes); Parakeet Ultra covers 25 languages.
+struct SetupModelChoice: View {
+    @EnvironmentObject private var models: ModelManager
+
+    var body: some View {
+        let word = DeviceWord.current
+        let choices = ModelCatalog.setupChoices(memoryBytes: models.device.memoryBytes)
+        let withWhisper = choices.contains { $0.engine.isWhisper }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pick your speech model").ffEyebrow()
+            Text(withWhisper ? (choices.first?.engine.isWhisper == true
+                                ? "Pick by the languages you speak. Whisper: about 99 languages, including Thai, Japanese, Chinese and Korean. Parakeet: English and 24 European languages, fastest."
+                                : "Pick by the languages you speak. Parakeet: English and 24 European languages, fastest. Whisper: about 99 languages, including Thai, Japanese, Chinese and Korean.")
+                             : "Pick by the languages you speak and the space you have.")
+                .font(FFFont.text(15, .semibold)).foregroundStyle(Palette.fg).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("setupLanguages")
+            ForEach(Array(choices.enumerated()), id: \.element.id) { i, model in
+                SetupModelCard(model: model, recommended: i == 0, lines: Self.lines(model, withWhisper: withWhisper, word: word),
+                               only: model.engine.isWhisper ? Self.onlyOnWhisper() : nil)
+            }
+            Text("You can switch any time in Settings > Models.").font(FFFont.text(14)).foregroundStyle(Palette.faint)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("setupChoice")
+    }
+
+    static func lines(_ model: SpeechModel, withWhisper: Bool, word: String) -> [String] {
+        if model.engine.isWhisper {
+            return ["About 99 languages, and it detects the one you speak. Tends to leave out filler words like \u{201C}um\u{201D} and \u{201C}like\u{201D}.",
+                    "First use: a one-time setup of about 1-2 minutes on this \(word)."]
+        }
+        if model.id == ModelCatalog.defaultPick && withWhisper {
+            return ["English and 24 other European languages. The faster of the two, and it writes down more literally what you say."]
+        }
+        return [model.blurb]
+    }
+
+    /// "Only on Whisper: Thai" when this device's language is one Parakeet does not speak.
+    static func onlyOnWhisper(language: String = ModelCatalog.currentLanguage) -> String? {
+        guard !ModelCatalog.parakeetLanguages.contains(language), let name = Locale.current.localizedString(forLanguageCode: language) else { return nil }
+        return "Only on Whisper: \(name)"
+    }
+}
+
+struct SetupModelCard: View {
+    @EnvironmentObject private var models: ModelManager
+    let model: SpeechModel
+    let recommended: Bool
+    let lines: [String]
+    var only: String? = nil
+
+    var body: some View {
+        let status = models.status[model.id] ?? .notDownloaded
+        let chosen = models.activeID == model.id
+        VStack(alignment: .leading, spacing: 10) {
+            Button { pick(status) } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 24, weight: .medium)).foregroundStyle(chosen ? Palette.brand : Palette.faint).frame(width: 28)
+                    MakerMark(model: model, size: 34)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if recommended {
+                            Text("Recommended").font(FFFont.text(12.5, .medium)).foregroundStyle(Palette.accentText)
+                                .lineLimit(1).fixedSize()
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Palette.accentSoft, in: Capsule(style: .continuous))
+                        }
+                        Text(model.engine.isWhisper ? "Whisper large-v3-turbo" : model.name).font(FFFont.text(21, .bold)).foregroundStyle(Palette.fg)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(model.maker) · \(model.downloadBytes.megabytes) download").font(FFFont.text(14, .medium)).foregroundStyle(Palette.faint)
+                            .accessibilityIdentifier("setupSize.\(model.id)")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("select.\(model.id)")
+            .accessibilityAddTraits(chosen ? .isSelected : [])
+            if let only {
+                Label(only, systemImage: "globe").font(FFFont.text(15, .semibold)).foregroundStyle(Palette.accentText)
+                    .accessibilityIdentifier("onlyOnWhisper")
+            }
+            ForEach(lines, id: \.self) { Text($0).font(FFFont.text(15)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true) }
+            action(status, chosen: chosen)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .ffStroke(Radius.card, chosen ? Palette.brand : Color.clear)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("model.\(model.id)")
+        .accessibilityValue(chosen ? "selected" : "not selected")
+    }
+
+    @ViewBuilder private func action(_ status: ModelManager.Status, chosen: Bool) -> some View {
+        switch status {
+        case .notDownloaded:
+            Button("Download \(model.downloadBytes.megabytes)") { pick(status); models.setupLanguage(for: model.id); Task { await models.download(model) } }
+                .buttonStyle(FFButtonStyle(chosen ? .ember : .secondary))
+                .accessibilityIdentifier("download.\(model.id)")
+        case .downloading(let p):
+            ProgressView(value: p).tint(Palette.brand)
+            Text(String(format: "Downloading %.0f%%", p * 100)).font(FFFont.mono(12)).accessibilityIdentifier("progress.\(model.id)")
+        case .verifying:
+            Text("Checking sha256…").font(FFFont.mono(12))
+        case .ready:
+            if !chosen {
+                Button("Use") { models.choose(model.id) }.buttonStyle(FFButtonStyle(.secondary)).accessibilityIdentifier("use.\(model.id)")
+            }
+            Text("Downloaded and checked").font(FFFont.mono(12)).foregroundStyle(Palette.ok).accessibilityIdentifier("verified.\(model.id)")
+        case .failed(let message):
+            Text(message).font(FFFont.text(14, .semibold)).foregroundStyle(Palette.danger)
+            Button("Try again") { Task { await models.download(model) } }.buttonStyle(FFButtonStyle(.secondary))
+        }
+    }
+
+    /// Same rule as the picker: a downloaded model switches at once; one not downloaded becomes the pick while no model
+    /// is ready yet (it never takes over from a working one before its download finishes).
+    private func pick(_ status: ModelManager.Status) {
+        if status == .ready { models.choose(model.id) } else if !models.activeReady { models.activeID = model.id }
+        models.setupLanguage(for: model.id)
+    }
+}
+
 /// One model in the picker: select it, download it, use it, or see why it does not fit.
 struct ModelRow: View {
     @EnvironmentObject private var models: ModelManager
@@ -703,7 +837,7 @@ struct ModelRow: View {
         case .ready:
             HStack(spacing: 10) {
                 if models.activeID != model.id {
-                    Button("Use") { models.activeID = model.id }.buttonStyle(FFButtonStyle(.secondary))
+                    Button("Use") { models.choose(model.id) }.buttonStyle(FFButtonStyle(.secondary))
                         .accessibilityIdentifier("use.\(model.id)")
                 }
                 if context == .settings {
@@ -722,7 +856,7 @@ struct ModelRow: View {
     /// A downloaded model switches at once; one not yet downloaded becomes the pick only while no model is ready
     /// (it never takes over from a working one before its download finishes).
     private func choose(_ status: ModelManager.Status) {
-        if status == .ready || !models.activeReady { models.activeID = model.id }
+        if status == .ready { models.choose(model.id) } else if !models.activeReady { models.activeID = model.id }
     }
 
     /// MBX tag: filled pill, no stroke.

@@ -57,6 +57,10 @@ enum MacTests {
                 }
                 rc = await startTest(host, count: Int(n), warm: args.contains("--warm"))
             }
+            else if let n = value(after: "--fnloop") {
+                rc = await fnLoop(host, presses: Int(n), hold: value(after: "--hold") ?? 3,
+                                  model: args.firstIndex(of: "--model").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil })
+            }
             else { say("no test named") }
             say("RC=\(rc)")
             exit(rc)
@@ -172,6 +176,54 @@ enum MacTests {
             say(String(format: (warm ? "listening (audio already flowing)" : "first non-zero sample") + " after the press: median %.0f ms, max %.0f ms over %d runs", sorted[sorted.count / 2], sorted.last!, sorted.count))
         }
         return firstSounds.count == max(1, count) ? 0 : 1
+    }
+
+    /// --fnloop <n> [--hold s] [--model id] (FF_NO_PASTE=1, FF_AUDIO_FILE=<speech>): n real fn presses through the event
+    /// tap (synthetic key events, the same callback a keyboard's fn reaches), each held `hold` s, on the given model.
+    /// Every press must give text; the process must stay up. The stored model pick is put back at the end.
+    static func fnLoop(_ host: MacHost, presses: Int, hold: Double, model: String?) async -> Int32 {
+        host.refresh()
+        guard host.accessibility else { say("Accessibility is off for this app: the fn tap can't run"); return 2 }
+        let models = ModelManager.shared
+        let saved = UserDefaults.standard.string(forKey: "activeModel")
+        defer { if let saved { UserDefaults.standard.set(saved, forKey: "activeModel") } }
+        if let model { models.activeID = model }
+        say("picked \(models.activeID), footprint \(DeviceProfile.footprintBytes() >> 20) MB")
+        // A build without this model in its catalog deletes its folder at launch (ModelCatalog.removed): say so at once.
+        guard FileManager.default.fileExists(atPath: Transcriber.root.appendingPathComponent(models.activeID).path) else {
+            say("model \(models.activeID): no files at \(Transcriber.root.path)"); return 2
+        }
+        for _ in 0..<1200 where !models.activeReady { try? await Task.sleep(nanoseconds: 500_000_000) }   // a recheck hashes files
+        guard models.activeReady else { say("model \(models.activeID) not ready"); return 2 }
+        say("ready \(models.activeID); loading")
+        let t0 = Date()
+        // Every 10 s while the model loads: footprint, so a load that ends the process shows how far it got.
+        let beat = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if Task.isCancelled { break }
+                say(String(format: "loading %.0f s, footprint %llu MB", Date().timeIntervalSince(t0), DeviceProfile.footprintBytes() >> 20))
+            }
+        }
+        do { _ = try await models.ensureLoaded() } catch { say("load error: \(error)") }
+        beat.cancel()
+        say(String(format: "model %@ loaded in %.1f s, footprint %llu MB", models.activeID, Date().timeIntervalSince(t0),
+                   DeviceProfile.footprintBytes() >> 20))
+        var empty = 0
+        for i in 1...max(1, presses) {
+            let before = host.testResults.count
+            host.postFn(true)
+            try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
+            host.postFn(false)
+            for _ in 0..<240 where host.testResults.count == before { try? await Task.sleep(nanoseconds: 250_000_000) }
+            guard host.testResults.count > before, let r = host.testResults.last else { say("press \(i): no result in 60 s"); empty += 1; continue }
+            if r.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { empty += 1 }
+            say(String(format: "press %d: %.2f s after fn up, %d characters: %@", i, r.seconds, r.text.count, String(r.text.prefix(80))))
+            for _ in 0..<40 where host.fnBusy { try? await Task.sleep(nanoseconds: 250_000_000) }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        say("presses \(presses), empty \(empty), model \(models.activeID)")
+        return empty == 0 ? 0 : 1
     }
 
     /// fn held for `seconds` in each app, as a person would: the field must hold the dictated text afterwards.

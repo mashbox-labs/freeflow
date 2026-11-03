@@ -8,10 +8,17 @@ import AVFAudio
 
 struct SettingsView: View {
     @AppStorage("sessionMinutes") private var sessionMinutes = 15
-    @AppStorage(SpeechLanguage.key) private var speechLanguage = ""
-    static var deviceLanguageName: String {
-        let code = SpeechLanguage.deviceDefault(preferred: Locale.preferredLanguages, supported: ModelCatalog.parakeetLanguages)
+    @AppStorage(SpeechLanguage.key) private var speechLanguage = SpeechLanguage.automatic   // 2026-11-03: Automatic by default
+    @ObservedObject private var models = ModelManager.shared
+    /// The device's language as the app's models know it (English when none does).
+    static func deviceLanguageName() -> String {
+        let code = SpeechLanguage.deviceDefault(preferred: Locale.preferredLanguages, supported: ModelManager.routableLanguages)
         return code.flatMap { Locale.current.localizedString(forLanguageCode: $0) } ?? "English"
+    }
+    /// Every language a dictation can be pinned to, by name.
+    static func languageChoices() -> [(code: String, name: String)] {
+        ModelManager.routableLanguages.map { (code: $0, name: Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
+            .sorted { $0.name < $1.name }
     }
     @AppStorage("mixWithOthers") private var mixWithOthers = true
     @AppStorage("duckOthers") private var duckOthers = false
@@ -60,12 +67,35 @@ struct SettingsView: View {
             Section("Speech model") {
                 NavigationLink("Models") { ModelsView() }
                     .accessibilityIdentifier("settings.models")
-                // Build 23: the language is pinned; Automatic is opt-in.
+                // Build 23: the language is pinned; Automatic is opt-in. Build 26: the list is
+                // the model in use's own languages (Whisper's 99 when it is Whisper), Automatic is offered only on a
+                // model with more than one language, and an English-only model shows no picker.
+                // 2026-11-02: the language picks the engine. The list is Parakeet's 25 plus Whisper's full set
+                // when a Whisper model is in the catalog; English and Parakeet's languages dictate on Parakeet, every
+                // other language on Whisper, and Automatic (opt-in, guessed once per dictation) is Whisper only.
+                let hasWhisper = ModelManager.whisperModel != nil
+                let choices = Self.languageChoices()
                 Picker("Language", selection: $speechLanguage) {
-                    Text("\(Self.deviceLanguageName) (this \(DeviceWord.current)'s language)").tag("")
-                    ForEach(Transcriber.languageChoices, id: \.code) { l in Text(l.name).tag(l.code) }
+                    if hasWhisper {
+                        Text("Automatic (detects the language you speak)").tag(SpeechLanguage.automatic)
+                    }
+                    Text("\(Self.deviceLanguageName()) (this \(DeviceWord.current)'s language)").tag("")
+                    ForEach(choices, id: \.code) { l in Text(l.name).tag(l.code) }
                 }
                 .accessibilityIdentifier("settings.language")
+                .onChange(of: speechLanguage) { _, _ in models.reroute() }
+                let routed = models.routedID()
+                if let model = ModelCatalog.model(routed) {
+                    let languageName = ModelManager.routedLanguage().flatMap { Locale.current.localizedString(forLanguageCode: $0) } ?? "Automatic"
+                    if models.routedMissing == routed {
+                        Button("Download \(model.name) (\(model.downloadBytes.megabytes)) to dictate in \(languageName)") { models.use(routed) }
+                            .accessibilityIdentifier("settings.routedDownload")
+                    } else {
+                        Text("\(languageName) runs on \(model.name)")
+                            .font(FFFont.text(14)).foregroundStyle(Palette.muted)
+                            .accessibilityIdentifier("settings.routedModel")
+                    }
+                }
 
             }
             .listRowSeparator(.hidden)

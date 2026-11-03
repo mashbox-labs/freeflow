@@ -161,6 +161,7 @@ public enum SharedSession {
         static let style = "style.current", error = "session.error", input = "session.input"
         static let pendingStart = "keyboard.pendingStart", gestures = "keyboard.gestures"
         static let stage = "session.stage"
+        static let writerOn = "writer.appleOn"
     }
     private static var d: UserDefaults { FF.defaults }
 
@@ -200,6 +201,15 @@ public enum SharedSession {
         get { d.string(forKey: Key.resultID) ?? "" }
         set { d.set(newValue, forKey: Key.resultID) }
     }
+    /// Build 37: Apple Intelligence cleanup on, mirrored here by the app (WriterChoice.mirrorToKeyboard).
+    /// nil = never written (an app from before 37 that has not run since the update).
+    public static var writerOn: Bool? {
+        get { d.object(forKey: Key.writerOn) as? Bool }
+        set { d.set(newValue, forKey: Key.writerOn) }
+    }
+    /// The keyboard's style key does something only with cleanup on, so it shows only then. Not yet mirrored = shown,
+    /// as before 37 (an existing user keeps it until the app has run once and says cleanup is off).
+    public static var styleKeyShown: Bool { writerOn ?? true }
     public static var style: DictationStyle {
         get { DictationStyle(rawValue: d.string(forKey: Key.style) ?? "") ?? .formal }
         set { d.set(newValue.rawValue, forKey: Key.style) }

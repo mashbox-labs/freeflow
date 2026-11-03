@@ -98,6 +98,7 @@ struct AboutView: View {
 enum Credits {
     static func logo(_ name: String) -> String? {
         if name.hasPrefix("Parakeet") { return "logo-nvidia" }
+        if name.hasPrefix("Whisper ") { return "logo-openai" }
         if name == "Model downloads" { return "logo-huggingface" }
         if name == "WhisperKit" || name == "FluidAudio" || name == "llama.cpp and whisper.cpp" { return "logo-github" }
         return nil
@@ -108,6 +109,7 @@ enum Credits {
         ("Underdog Bark 3.0 Clean and Bark 3.0 Pro", "Conway Research, from NVIDIA's Parakeet TDT 0.6B v3 and Moondream's Parakeet Ultra. Licensed CC-BY-4.0. Core ML for Bark 3.0 Clean by FluidInference, for Bark 3.0 Pro by Conway Research. Their NOTICE files in full under Third-party notices."),
         ("Parakeet TDT 0.6B v3", "NVIDIA. Licensed CC-BY-4.0. The C++ backup: GGUF files by ggml-org (model card: MIT)."),
         ("llama.cpp and whisper.cpp", "The ggml authors (ggml-org). Licensed MIT. The C++ speech engine."),
+        ("Whisper large-v3-turbo", "OpenAI. Licensed MIT. Core ML conversion for the Neural Engine by MASHBOX Labs."),
         ("FluidAudio", "FluidInference. Licensed Apache-2.0."),
         ("WhisperKit", "Argmax. Licensed MIT."),
         ("Model downloads", "Hugging Face hosts the model files. Each file the Download button fetches is checked against a sha256 pinned in this build."),

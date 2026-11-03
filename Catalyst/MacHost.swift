@@ -106,6 +106,9 @@ final class MacHost: ObservableObject {
     func testOpen(_ path: String, _ app: String) { bridge?.testOpen(path, app) }
     func focusedText() -> String { bridge?.focusedText() ?? "" }
     var lastInserted: String { lastText }
+    /// --fnloop (FF_NO_PASTE=1): each finished fn dictation's text and seconds from fn up to text.
+    var testResults: [(text: String, seconds: Double)] = []
+    var fnBusy: Bool { fnDictation || starting }
     #endif
 
     func refresh() {
@@ -260,8 +263,21 @@ final class MacHost: ObservableObject {
 
     private func finishFn() async {
         bridge?.pill("working", "", 0)
+        #if DEBUG || FF_TESTS
+        let t0 = Date()
+        #endif
         let text = await engine.finishDictation()
         endFn()
+        #if DEBUG || FF_TESTS
+        // --fnloop: the text and the wait from fn up to text are recorded; nothing is pasted into another app.
+        if ProcessInfo.processInfo.environment["FF_NO_PASTE"] == "1" {
+            testResults.append((text, Date().timeIntervalSince(t0)))
+            lastText = text
+            releaseMicIfAsked()
+            bridge?.pill("hide", "", 0)
+            return
+        }
+        #endif
         guard !text.isEmpty else {
             releaseMicIfAsked()
             bridge?.pill("message", engine.errorText ?? "Didn't catch that. Try again.", 2.4)

@@ -22,6 +22,12 @@ public enum WriterChoice: String, CaseIterable, Identifiable, Sendable {
         set { UserDefaults.standard.set(newValue?.rawValue, forKey: key) }
     }
 
+    /// Build 37: tells the keyboard whether cleanup is on (SharedSession.writerOn), written only when it changed.
+    public static func mirrorToKeyboard() {
+        let on = resolved == .apple
+        if SharedSession.writerOn != on { SharedSession.writerOn = on }
+    }
+
     /// The stored choice, else off (build 33).
     public static var resolved: WriterChoice { resolved(raw: UserDefaults.standard.string(forKey: key)) }
 

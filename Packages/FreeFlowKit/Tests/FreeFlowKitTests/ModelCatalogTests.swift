@@ -33,12 +33,21 @@ final class ModelCatalogTests: XCTestCase {
         let ids = ModelCatalog.all.filter { !$0.engine.isCpp }.map(\.id)
         // Build 23: Parakeet Ultra, Phonon-2, Parakeet Redux, and the C++ backup, plus Underdog Bark 3.0 Clean and Pro
         // (Conway Research). Nemotron Unified dropped: without live words it adds nothing Ultra does not.
-        XCTAssertEqual(ids, ["parakeet-ultra", "phonon-2", "parakeet-redux", "bark-3.0-clean", "bark-3-pro"])
-        for id in ids { XCTAssertEqual(ModelCatalog.model(id)?.engine, .parakeetV3, id) }
+        // Build 26: Whisper large-v3-turbo back (restore of the build 22 entry, the same pinned files).
+        // 2026-11-02: our own Neural Engine build of large-v3-turbo.
+        // 2026-11-03: the WhisperKit build ("large") is hidden, not removed: not offered, files kept.
+        XCTAssertEqual(ids, ["parakeet-ultra", "phonon-2", "parakeet-redux", "bark-3.0-clean", "bark-3-pro", "whisper-turbo-ane"])
+        for id in ids.dropLast() { XCTAssertEqual(ModelCatalog.model(id)?.engine, .parakeetV3, id) }
+        XCTAssertNil(ModelCatalog.model("large"))
+        XCTAssertEqual(ModelCatalog.hidden, ["large"])
+        XCTAssertEqual(ModelCatalog.model("whisper-turbo-ane")?.engine, .whisperANE)
+        XCTAssertNil(ModelCatalog.model("whisper-turbo-ane")?.languageCodes, "Whisper's full language set")
+        XCTAssertFalse(ModelCatalog.model("whisper-turbo-ane")!.usesDictionary)
         XCTAssertNil(ModelCatalog.model("nemotron-unified"))
         // Never the automatic pick: only Ultra (and Redux below 5 GB) are.
         for id in ["phonon-2", "bark-3.0-clean", "bark-3-pro"] { XCTAssertNil(ModelCatalog.model(id)?.recommendFromGiB, id) }
-        XCTAssertFalse(ModelCatalog.all.contains { $0.engine == .whisperKit || $0.engine == .ggmlAudioLLM })
+        XCTAssertFalse(ModelCatalog.all.contains { $0.engine == .ggmlAudioLLM })
+        XCTAssertNil(ModelCatalog.removed["large"], "hidden, not removed: its files must not be deleted at launch")
         XCTAssertEqual(ModelCatalog.parakeetLanguages.count, 25)
         XCTAssertEqual(ModelCatalog.model("phonon-2")?.languageCodes, ["en"])
         XCTAssertNil(ModelCatalog.extraSmall())
@@ -63,9 +72,10 @@ final class ModelCatalogTests: XCTestCase {
     func testRecommendation() {
         XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(3.7), language: "en").id, "parakeet-redux")
         XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(5.6), language: "en").id, "parakeet-ultra")
-        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(7.5), language: "en").id, "parakeet-ultra")
-        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(11.2), language: "en").id, "parakeet-ultra")
-        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(7.5), language: "th").id, "parakeet-ultra")
+        // Build 39: our Whisper from 7.0 GiB (8 GB devices), for every language.
+        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(7.5), language: "en").id, "whisper-turbo-ane")
+        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(11.2), language: "en").id, "whisper-turbo-ane")
+        XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(7.5), language: "th").id, "whisper-turbo-ane")
         XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(5.6), language: "ja").id, "parakeet-ultra")
         XCTAssertEqual(ModelCatalog.recommended(memoryBytes: bytes(3.7), language: "ja").id, "parakeet-redux")
         XCTAssertEqual(ModelCatalog.defaultPick, "parakeet-ultra")
@@ -89,7 +99,7 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ModelCatalog.pickerOrder(recommended: small, in: models).map(\.id), ["small", "large", "medium", "tiny-q"])
         // The bundled catalog: every model listed once.
         let shipped = ModelCatalog.pickerOrder(recommended: ModelCatalog.recommended(memoryBytes: bytes(11.2), language: "en"))
-        XCTAssertEqual(shipped.map(\.id), ["parakeet-ultra", "bark-3-pro", "bark-3.0-clean", "phonon-2", "parakeet-redux"])
+        XCTAssertEqual(shipped.map(\.id), ["whisper-turbo-ane", "bark-3-pro", "parakeet-ultra", "bark-3.0-clean", "phonon-2", "parakeet-redux"])
     }
 
     func testTooBigByMemory() throws {
@@ -101,8 +111,12 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ModelCatalog.tooBigReason(large, memoryBytes: bytes(3.7), device: "iPad"),
                        "Needs 8 GB of memory. This iPad has 4 GB.")
         XCTAssertNil(ModelCatalog.tooBigReason(large, memoryBytes: bytes(7.5), device: "iPhone"))
-        // Every model in the catalog stays pickable on 4 GB devices (Ultra is not recommended there, but it fits).
-        for m in ModelCatalog.all where !m.engine.isCpp { XCTAssertTrue(m.fits(memoryBytes: bytes(3.7)), m.id) }
+        // Every model in the catalog stays pickable on 4 GB devices (Ultra is not recommended there, but it fits), except
+        // Whisper large-v3-turbo, restored as build 22 had it: 8 GB devices and up (minMemoryGiB 7).
+        // Our Whisper Neural Engine build (973 MB, 8-bit): 6 GB devices and up (minMemoryGiB 5).
+        for m in ModelCatalog.all where !m.engine.isCpp && !m.engine.isWhisper { XCTAssertTrue(m.fits(memoryBytes: bytes(3.7)), m.id) }
+        XCTAssertFalse(try XCTUnwrap(ModelCatalog.model("whisper-turbo-ane")).fits(memoryBytes: bytes(3.7)))
+        XCTAssertTrue(try XCTUnwrap(ModelCatalog.model("whisper-turbo-ane")).fits(memoryBytes: bytes(5.6)))
     }
 
     func testExtraSmallSlotsInFromData() throws {

@@ -17,6 +17,7 @@ actor Transcriber {
     static let shared = Transcriber()
     private var parakeet: AsrManager?
     private var whisper: WhisperKit?
+    private var ane: WhisperANE?
     private var cpp: SpeechEngine?
     private var loadedID: String?
     private var decoderLayers = 2
@@ -101,13 +102,13 @@ actor Transcriber {
 
     /// What one load made, before it is put in use or let go.
     private enum Built {
-        case cpp(SpeechEngine), parakeet(AsrManager, layers: Int), whisper(WhisperKit)
+        case cpp(SpeechEngine), parakeet(AsrManager, layers: Int), whisper(WhisperKit), ane(WhisperANE)
 
         func close() async {
             switch self {
             case .cpp(let engine): engine.close()
             case .parakeet(let manager, _): await manager.cleanup()
-            case .whisper: break          // let go with its last reference
+            case .whisper, .ane: break    // let go with its last reference
             }
         }
     }
@@ -150,6 +151,21 @@ actor Transcriber {
             Self.crashGuard.begin(id, .load)
             defer { Self.crashGuard.end() }
             built = .cpp(try await Self.loadCpp(model, directory: Self.directory(for: id), backend: Self.backendNow()))
+        } else if ModelCatalog.model(id)?.engine == .whisperANE {
+            // Our Whisper build: every length bucket on the Mac; with one function per bucket an iPhone or iPad loads
+            // two (10 s and the 30 s window), since the Neural Engine keeps a copy of the weights per function. A
+            // one-program build (manifest one_program) holds one copy, so every device loads every bucket.
+            #if targetEnvironment(macCatalyst)
+            var buckets: [Int]? = nil
+            #else
+            var buckets: [Int]? = [10, 30]
+            #endif
+            // Test builds: FF_ANE_BUCKETS=10,30 measures the phone's bucket set on the Mac.
+            var forced = false
+            if let env = ProcessInfo.processInfo.environment["FF_ANE_BUCKETS"] { buckets = env.split(separator: ",").compactMap { Int($0) }; forced = true }
+            let directory = Self.directory(for: id)
+            let pick = buckets, force = forced
+            built = .ane(try await Task.detached(priority: .userInitiated) { try WhisperANE(directory: directory, buckets: pick, forced: force) }.value)
         } else if ModelCatalog.model(id)?.engine == .parakeetV3 {
             let directory = Self.directory(for: id)
             try await Self.compilePackages(in: directory)
@@ -186,6 +202,7 @@ actor Transcriber {
         case .cpp(let engine): cpp = engine
         case .parakeet(let manager, let layers): parakeet = manager; decoderLayers = layers
         case .whisper(let kit): whisper = kit
+        case .ane(let engine): ane = engine
         }
         loadedID = id
         let after = DeviceProfile.footprintBytes()
@@ -202,6 +219,7 @@ actor Transcriber {
         let oldParakeet = parakeet, oldCpp = cpp
         parakeet = nil
         whisper = nil
+        ane = nil
         cpp = nil
         loadedID = nil
         loadedBytes = 0
@@ -391,7 +409,7 @@ actor Transcriber {
             do {
                 // Build 23: Parakeet keeps to the same language where FluidAudio takes one (its 25 languages).
                 let covered = Set(ModelCatalog.model(loadedID ?? "")?.languageCodes ?? ["en"])
-                let pinned = Language(rawValue: await MainActor.run { Self.speechLanguage(supported: covered) } ?? "en")
+                let pinned = Language(rawValue: await MainActor.run { Self.pinnedLanguage(supported: covered, automaticAllowed: false) } ?? "en")
                 result = try await parakeet.transcribe(audio, decoderState: &state, language: pinned)
             } catch {
                 await parakeet.setChunkPacer(nil)
@@ -403,16 +421,34 @@ actor Transcriber {
             let timings = buildWordTimings(from: result.tokenTimings ?? []).map { TimedWord($0.word, start: $0.startTime, end: $0.endTime) }
             return (result.text.trimmingCharacters(in: .whitespacesAndNewlines), timings)
         }
+        if let ane {
+            // Our Whisper build: the setting's language, or Automatic (nil: detected once per dictation, 2026-11-03).
+            let supported = ane.languageCodes
+            let language = await MainActor.run { Self.pinnedLanguage(supported: supported, automaticAllowed: true) }
+            vocabularyWords = 0
+            vocabularyFlips = 0
+            let text = try await Task.detached(priority: .userInitiated) { try ane.transcribe(samples, language: language) }.value
+            lastLanguage = ane.lastLanguage
+            let t = ane.lastTimings
+            NSLog("FFMODEL whisper-ane lang=%@ bucket=%ds fallback=%d audio=%.1fs mel=%.0fms enc=%.0fms prefill=%.0fms dec=%.0fms total=%.0fms",
+                  (language ?? "auto:") + (language == nil ? ane.lastLanguage : ""), ane.lastBucket, ane.lastFallback ? 1 : 0, Double(samples.count) / 16_000, (t["mel"] ?? 0) * 1000,
+                  (t["encoder"] ?? 0) * 1000, (t["prefill"] ?? 0) * 1000, (t["decoder"] ?? 0) * 1000, (t["total"] ?? 0) * 1000)
+            return (text, [])
+        }
         if let whisper {
             // Build 23: one language for every window. WhisperKit with no language guessed it again for
             // each 30 s window and at each fallback temperature (sampled, so at random); one English dictation came out
             // Korean, then Spanish, then English. Pinned: the setting's language (the device's by default), or, with
             // Automatic, one guess from the start of this dictation used for all of it. Task: transcribe, never translate.
-            var language = await MainActor.run { Self.speechLanguage(supported: Constants.languageCodes) }
-            if language == nil, whisper.textDecoder.isModelMultilingual {
+            // Build 26: the languages are the model's own (catalog), Whisper's full set when it lists none;
+            // Automatic only when chosen; an unknown device language is English, never a guess (SpeechLanguage.pinned).
+            let supported = whisper.textDecoder.isModelMultilingual
+                ? ModelCatalog.languages(of: ModelCatalog.model(loadedID ?? ""), whisper: Constants.languageCodes) : ["en"]
+            var language = await MainActor.run { Self.pinnedLanguage(supported: supported) }
+            if language == nil {
                 language = try? await whisper.detectLangauge(audioArray: samples).language   // WhisperKit spells it so
             }
-            if !whisper.textDecoder.isModelMultilingual { language = "en" }
+            if language == nil || !supported.contains(language!) { language = supported.contains("en") ? "en" : supported.sorted().first }
             lastLanguage = language ?? "unknown"
             // Timestamps on (build 23, measured 10-31: off, a window Whisper ended early lost its tail, 189 of 280 words on a
             // 90 s clip; on, 293), so WhisperKit seeks from the last segment instead of skipping the rest of the window.
@@ -436,9 +472,20 @@ actor Transcriber {
                                preferred: Locale.preferredLanguages, supported: supported)
     }
 
-    /// The Settings list (build 23: the 25 languages the Parakeet models speak): code and name, by name.
-    nonisolated static var languageChoices: [(code: String, name: String)] {
-        ModelCatalog.parakeetLanguages.map { (code: $0, name: Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
+    /// Build 26: the language the decoder is told (nil only when the person chose Automatic on a multilingual model).
+    @MainActor static func pinnedLanguage(supported: Set<String>, automaticAllowed: Bool = true) -> String? {
+        SpeechLanguage.pinned(stored: UserDefaults.standard.string(forKey: SpeechLanguage.key),
+                              preferred: Locale.preferredLanguages, supported: supported, automaticAllowed: automaticAllowed)
+    }
+
+    /// Build 26: the languages a catalog model can be pinned to (Whisper: its full set).
+    nonisolated static func languages(of id: String) -> Set<String> {
+        ModelCatalog.languages(of: ModelCatalog.model(id), whisper: Constants.languageCodes)
+    }
+
+    /// The Settings list for the model in use: code and name, by name (build 23 listed Parakeet's 25 for every model).
+    nonisolated static func languageChoices(for id: String) -> [(code: String, name: String)] {
+        languages(of: id).map { (code: $0, name: Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
             .sorted { $0.name < $1.name }
     }
 

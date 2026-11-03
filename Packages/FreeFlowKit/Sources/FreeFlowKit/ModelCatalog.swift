@@ -22,6 +22,9 @@ public struct SpeechModel: Identifiable, Hashable, Sendable, Decodable {
     /// The runtime that runs the files.
     public enum Engine: String, Sendable, Decodable {
         case whisperKit = "whisperkit"
+        /// Our own Whisper large-v3-turbo Core ML build on the Neural Engine (WHISPER-ANE, 2026-11-02): length-bucket
+        /// encoder, stateful decoder, greedy with Whisper's suppress lists and the compression-ratio fallback.
+        case whisperANE = "whisper-ane"
         case parakeetV3 = "parakeet-v3"
         /// whisper.cpp Parakeet code on our one ggml (FreeFlowEngine, C++): Metal in the foreground, CPU in the background.
         case ggmlParakeet = "ggml-parakeet"
@@ -30,6 +33,8 @@ public struct SpeechModel: Identifiable, Hashable, Sendable, Decodable {
 
         /// Runs on the C++ engine (any iPhone the app supports; no Neural Engine needed).
         public var isCpp: Bool { self == .ggmlParakeet || self == .ggmlAudioLLM }
+        /// A Whisper engine (either runtime): the one the language routing sends non-Parakeet languages to.
+        public var isWhisper: Bool { self == .whisperKit || self == .whisperANE }
 
         /// Build 23: the dictionary is used while decoding (Parakeet on Core ML: decode-time boost on its top-K; Whisper:
         /// the words as its prompt). The C++ engine has no decode-time hook, so it gets no words. Transcriber.transcribe
@@ -164,8 +169,13 @@ public enum ModelCatalog {
         do { return try decodeFile(Data(contentsOf: url)) } catch { fatalError("speech-models.json: \(error)") }
     }()
 
-    /// Every model in the bundled catalog, in file order.
-    public static let all: [SpeechModel] = bundled.models
+    /// Models kept in the catalog file but not offered (2026-11-03: the WhisperKit build of Whisper
+    /// large-v3-turbo next to our Neural Engine build of the same model). Not on `removed`: files already on a device
+    /// stay where they are; the model just is not listed, picked or routed to.
+    public static let hidden: Set<String> = ["large"]
+
+    /// Every model offered: the bundled catalog in file order, without the hidden ones.
+    public static let all: [SpeechModel] = bundled.models.filter { !hidden.contains($0.id) }
 
     /// The Models page sections in the bundled catalog, in file order.
     public static let groups: [ModelGroup] = bundled.groups ?? []
@@ -227,6 +237,13 @@ public enum ModelCatalog {
 
     public static func model(_ id: String) -> SpeechModel? { all.first { $0.id == id } }
 
+    /// The languages a model can be pinned to: its own list, or (nil, Whisper) the full set the caller passes in.
+    /// More than one = the model gets a language setting (device language by default, Automatic only by choice).
+    public static func languages(of model: SpeechModel?, whisper: Set<String>) -> Set<String> {
+        guard let model else { return ["en"] }
+        return model.languageCodes.map(Set.init) ?? whisper
+    }
+
     /// Languages Parakeet TDT 0.6B v3 covers (ISO 639-1), from the catalog.
     public static var parakeetLanguages: Set<String> { Set(all.first { $0.engine == .parakeetV3 }?.languageCodes ?? []) }
 
@@ -242,9 +259,30 @@ public enum ModelCatalog {
     /// preference rule below decides. Existing installs keep their pick.
     public static let defaultPick = "parakeet-ultra"
 
+    /// Build 38: the first-run page shows exactly two cards, the recommendation first and preselected.
+    /// Build 39: our Whisper is the recommendation where it runs properly (its recommendFromGiB, 7.0 = 8 GB
+    /// devices), with Parakeet Ultra second. Below that: Parakeet first (Ultra from 5 GiB, Redux below), then our Whisper
+    /// where it fits (5 GiB and up), else the best other model that fits.
+    public static let setupWhisper = "whisper-turbo-ane"
+    public static func setupChoices(memoryBytes: UInt64, in models: [SpeechModel] = all) -> [SpeechModel] {
+        let fits = models.filter { !$0.engine.isCpp && $0.fits(memoryBytes: memoryBytes) }
+        // First card = the recommendation Models shows too (Parakeet Ultra from 5 GiB, the smaller Parakeet Redux below).
+        let rec = recommended(memoryBytes: memoryBytes, in: models)
+        guard let first = fits.first(where: { $0.id == rec.id }) ?? fits.first else { return [] }
+        let second = (first.id == setupWhisper ? fits.first(where: { $0.id == defaultPick }) : nil)
+            ?? fits.first(where: { $0.id == setupWhisper && $0.id != first.id })
+            ?? fits.filter { $0.id != first.id && !$0.engine.isWhisper }.max { ($0.preference, $1.downloadBytes) < ($1.preference, $0.downloadBytes) }
+        return [first] + (second.map { [$0] } ?? [])
+    }
+
     public static func recommended(memoryBytes: UInt64, language: String = currentLanguage,
                                    in models: [SpeechModel] = all) -> SpeechModel {
         let memory = Double(memoryBytes) / gib
+        // Build 39: our Whisper wherever it runs properly (from its recommendFromGiB), for every language.
+        if let w = models.first(where: { $0.id == setupWhisper }), !w.engine.isCpp, w.fits(memoryBytes: memoryBytes),
+           let from = w.recommendFromGiB, memory >= from {
+            return w
+        }
         // The default for every language: one not covered transcribes in English until its model comes.
         if let pick = models.first(where: { $0.id == defaultPick }), !pick.engine.isCpp, pick.fits(memoryBytes: memoryBytes),
            memory >= (pick.recommendFromGiB ?? 0) {
@@ -291,8 +329,9 @@ public enum ModelCatalog {
 
     /// Build 23: models earlier builds offered and this one doesn't. A pick of
     /// one moves to the default with one plain line, and its files are deleted from the device.
+    /// Whisper large-v3-turbo ("large") is offered again (build 26), so it is not on this list.
     public static let removed: [String: String] = [
-        "small": "Whisper small", "medium": "Parakeet TDT 0.6B v3", "large": "Whisper large-v3-turbo",
+        "small": "Whisper small", "medium": "Parakeet TDT 0.6B v3",
         "whisper-tiny": "Whisper tiny", "whisper-base": "Whisper base", "whisper-small-f16": "Whisper small 16-bit",
         "lfm3-audio-q4_0": "LFM3-Audio-2B Q4_0",
     ]

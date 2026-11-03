@@ -263,8 +263,20 @@ public enum KeyboardLayouts {
 
     public static func keys(_ kind: KeyLayoutKind, width: Double, height: Double, isPad: Bool, scale: Double,
                             globe: Bool = false, symbols: Bool = false, hand: KeyHand = .right,
-                            page: KeyPage? = nil, field: KeyField = .text) -> [KeySlot] {
+                            page: KeyPage? = nil, field: KeyField = .text, styleKey: Bool = true) -> [KeySlot] {
         KeyGeometry.layout(kind, width: width, height: height, pointsPerMM: pointsPerMM(scale: scale, isPad: isPad),
-                           apple: metrics(width: width, isPad: isPad), globe: globe, symbols: symbols, hand: hand, page: page, field: field)
+                           apple: metrics(width: width, isPad: isPad), spec: .keyboard(styleKey: styleKey || isPad), globe: globe, symbols: symbols,
+                           hand: hand, page: page, field: field).withoutStyleKey(!styleKey && isPad)
+    }
+}
+
+public extension Array where Element == KeySlot {
+    /// Build 38 (iPad on 37: the hide key did not get wider, Dictate got a lot longer): on iPad, without
+    /// the style key, the hide key takes the style key's place and the gap between them; Dictate keeps the exact frame
+    /// it has with the style key. Every other key is untouched. iPhone keeps build 37's row (ComfortSpec.phoneNoStyle).
+    func withoutStyleKey(_ remove: Bool) -> [KeySlot] {
+        guard remove, let s = first(where: { $0.id == "style" }), let h = first(where: { $0.id == "hide" }) else { return self }
+        let wide = KeySlot(id: "hide", hit: h.hit.union(s.hit), visible: h.visible.union(s.visible), kind: h.kind, notch: h.notch, visible2: h.visible2)
+        return compactMap { $0.id == "style" ? nil : ($0.id == "hide" ? wide : $0) }
     }
 }

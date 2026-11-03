@@ -47,6 +47,45 @@ final class HostAppUITests: XCTestCase {
         return mic.exists
     }
 
+    /// Build 37: the style key shows only with Apple Intelligence cleanup on; off, the hide key is a little
+    /// wider and Dictate takes the rest. FF_WRITER = apple | off (the app mirrors it to the keyboard at launch).
+    /// Shots to FF_SHOTS_DIR as kb-<FF_WRITER>-<FF_SHOT_TAG>.png; key frames as KBROW lines.
+    func testK1StyleKeyFollowsCleanup() {
+        let env = ProcessInfo.processInfo.environment
+        let writer = env["FF_WRITER"] ?? "off"
+        app.launchArguments = ["-onboarded", "YES", "-writerChoice", writer]
+        app.launch()
+        XCTAssertTrue(app.buttons["micButton"].waitForExistence(timeout: 30), "Free Flow did not open on its home screen")
+        sleep(1)
+        app.terminate()
+        var up = freeFlowKeyboardInHost()
+        // iPad: the globe can land on Emoji, whose way back is its ABC key; cycle until ours shows.
+        for _ in 0..<6 where !up {
+            for name in ["Next keyboard", "ABC", "abc"] {
+                let b = host.buttons[name].firstMatch
+                if b.exists && b.isHittable { b.tap(); break }
+                let k = host.keys[name].firstMatch
+                if k.exists && k.isHittable { k.tap(); break }
+            }
+            up = host.buttons["kb.mic"].waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(up, "Free Flow keyboard did not appear in Contacts")
+        sleep(1)
+        let style = host.descendants(matching: .any)["kb.style"].firstMatch
+        let hide = host.descendants(matching: .any)["kb.hide"].firstMatch
+        let mic = host.descendants(matching: .any)["kb.mic"].firstMatch
+        for (id, e) in [("style", style), ("hide", hide), ("mic", mic)] where e.exists {
+            print(String(format: "KBROW %@ %@ x=%.1f w=%.1f h=%.1f", writer, id, e.frame.minX, e.frame.width, e.frame.height))
+        }
+        XCTAssertEqual(style.exists, writer == "apple", "style key shown \(style.exists) with cleanup \(writer)")
+        XCTAssertTrue(hide.exists && mic.exists)
+        let png = XCUIScreen.main.screenshot().pngRepresentation
+        let a = XCTAttachment(data: png, uniformTypeIdentifier: "public.png"); a.name = "kb-\(writer)"; a.lifetime = .keepAlways; add(a)
+        if let dir = env["FF_SHOTS_DIR"] {
+            try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("kb-\(writer)-\(env["FF_SHOT_TAG"] ?? "run").png"))
+        }
+    }
+
     /// The keyboard's mic key with no warm session must bring Free Flow to the front, or say on the keyboard, in
     /// words, that it could not and what to do. Never a silent wait.
     func testMicFromAnotherAppOpensFreeFlow() {

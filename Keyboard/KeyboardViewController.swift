@@ -246,6 +246,8 @@ final class KeyboardModel: ObservableObject {
     @Published var mode: Mode = .idle
     @Published var levels = [Float](repeating: 0, count: 32)
     @Published var style = SharedSession.style
+    /// Build 37: the style key only with Apple Intelligence cleanup on (SharedSession.styleKeyShown).
+    @Published var styleKey = SharedSession.styleKeyShown
     @Published var sessionLive = false
     /// From SessionTruth only: "Tap to turn on", "Ready · 12 min", "Listening", "Writing".
     @Published var status = "Tap to turn on"
@@ -309,6 +311,7 @@ final class KeyboardModel: ObservableObject {
         DictionaryStore.shared.reload()
         autocorrect.allow.setDictionary(DictionaryStore.shared.words)
         style = SharedSession.style
+        styleKey = SharedSession.styleKeyShown
         layout = KeyLayoutKind.current
         hand = KeyHand.current
         // A dictation started here and still running (or finished while the keyboard was hidden) lands when the
@@ -782,12 +785,14 @@ struct KeyboardView: View {
     private func topBar(width: CGFloat) -> some View {
         typealias M = KeyboardTopBar
         return HStack(spacing: M.spacing) {
-            Button(model.style.pill) { model.cycleStyle() }
-                .font(FFFont.fixed(M.styleSize, .bold)).lineLimit(1).minimumScaleFactor(0.6).fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, M.stylePadding).padding(.vertical, 7).layoutPriority(1)
-                .background(Capsule(style: .continuous).fill(KeyColors.modifier))
-                .foregroundStyle(.primary)
-                .accessibilityIdentifier("kb.style")
+            if model.styleKey {
+                Button(model.style.pill) { model.cycleStyle() }
+                    .font(FFFont.fixed(M.styleSize, .bold)).lineLimit(1).minimumScaleFactor(0.6).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, M.stylePadding).padding(.vertical, 7).layoutPriority(1)
+                    .background(Capsule(style: .continuous).fill(KeyColors.modifier))
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("kb.style")
+            }
             Spacer(minLength: 0)
             MicButton(size: M.mic, id: "kb.mic") { model.tapMic() }.buttonStyle(ClickStyle(kind: .mic, feel: model.feel))
             Spacer(minLength: 0)
@@ -797,7 +802,7 @@ struct KeyboardView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(model.sessionLive ? "Ready" : "Not ready").accessibilityValue(model.status)
                 .accessibilityIdentifier("kb.status")
-            HideKey(model: model, width: M.hide, height: 40)
+            HideKey(model: model, width: model.styleKey ? M.hide : 84, height: 40)
         }
         .padding(.horizontal, M.barPadding)
     }

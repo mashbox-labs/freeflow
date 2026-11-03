@@ -33,6 +33,26 @@ struct HomeView: View {
                 }
                 .ffCard()
             }
+            // 2026-11-03: never a dead end. The language's model is not on this device yet: dictation stays on the model
+            // in use and this line says so, with the download.
+            if let missing = models.routedMissing, missing != models.activeID, let need = ModelCatalog.model(missing) {
+                let language = ModelManager.routedLanguage().flatMap { Locale.current.localizedString(forLanguageCode: $0) } ?? "Automatic"
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(language) needs \(need.name). Until it is here, dictation uses \(models.active.name).", systemImage: "arrow.down.circle")
+                        .font(FFFont.text(15)).foregroundStyle(Palette.fg).fixedSize(horizontal: false, vertical: true)
+                    switch models.status[missing] {
+                    case .downloading(let f):
+                        ProgressView(value: f) { Text("Downloading \(Int(f * 100))%").font(FFFont.text(13)).foregroundStyle(Palette.muted) }
+                            .tint(Palette.brand)
+                    case .failed(let why):
+                        Text(why).font(FFFont.text(13)).foregroundStyle(Palette.muted)
+                        Button("Try again") { models.use(missing) }.buttonStyle(FFButtonStyle(.secondary))
+                    default:
+                        Button("Download (\(need.downloadBytes.megabytes))") { models.use(missing) }.buttonStyle(FFButtonStyle(.secondary))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).ffCard().accessibilityIdentifier("home.routedMissing")
+            }
             if let notice = models.crashNotice {
                 Label(notice, systemImage: "arrow.uturn.backward.circle")
                     .font(FFFont.text(16, .semibold)).foregroundStyle(Palette.fg)
@@ -81,7 +101,7 @@ struct HomeView: View {
                                onFinish: { Task { await engine.finishDictation() } })
             } else {
                 MicButton { Task { await engine.startDictation(target: .app) } }
-                Text(models.activeReady ? "\(DictationEngine.SystemWords.tap) to dictate · \(models.active.name)"
+                Text(models.activeReady ? "\(DictationEngine.SystemWords.tap) to dictate · \(models.active.name) · \(ModelManager.routedLanguage().flatMap { Locale.current.localizedString(forLanguageCode: $0) } ?? "Automatic language")"
                      : (models.activeMissing ? "Your speech model (\(models.active.name)) is missing. Download it again to dictate."
                                              : "Download a speech model to start"))
                     .font(FFFont.text(15, .semibold)).foregroundStyle(models.activeReady ? Palette.muted : Palette.warn)

@@ -131,7 +131,8 @@ final class DictationEngine: ObservableObject {
         if #available(iOS 26.0, *) { BackgroundProbe.install() }
         #endif
         let file = ProcessInfo.processInfo.environment["FF_AUDIO_FILE"]
-        capture = AudioCapture(testFile: file.map { URL(fileURLWithPath: $0) })
+        // A relative FF_AUDIO_FILE is inside this app's container (device tests: devicectl copies the clip to Documents/).
+        capture = AudioCapture(testFile: file.map { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent($0) })
         #if targetEnvironment(macCatalyst)
         capture.preroll = 0.3   // build 26: with the mic kept on between fn presses, the 0.3 s before the press stays
         #endif

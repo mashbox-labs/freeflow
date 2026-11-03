@@ -23,6 +23,11 @@ struct FreeFlowApp: App {
         FFFont.register()
         Appearance.apply()
         DictationEngine.installIntentHooks()
+        // Build 37: the keyboard shows its style key only with Apple Intelligence cleanup on.
+        WriterChoice.mirrorToKeyboard()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
+            WriterChoice.mirrorToKeyboard()
+        }
     }
 
     var body: some Scene {

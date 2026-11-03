@@ -24,6 +24,18 @@ public enum SpeechLanguage {
         preferred.lazy.map(code(of:)).first { supported.contains($0) }
     }
 
+    /// Build 26 (Whisper back): the language a dictation is decoded in. Never Automatic unless the person
+    /// chose it, and only for a model with more than one language; a device language the model doesn't know is English
+    /// (or the model's first language), never a guess. nil = Automatic (one guess per dictation, then pinned).
+    /// `automaticAllowed`: the engine can guess (Whisper); elsewhere a stored Automatic means the device's language.
+    /// 2026-11-03: nothing stored = Automatic on an engine that can
+    /// detect the language (Whisper); "" stays an explicit "this device's language".
+    public static func pinned(stored: String?, preferred: [String], supported: Set<String>, automaticAllowed: Bool = true) -> String? {
+        if stored == nil || stored == automatic, supported.count > 1, automaticAllowed { return nil }
+        if let code = resolve(stored: stored == automatic ? "" : stored, preferred: preferred, supported: supported) { return code }
+        return supported.contains("en") || supported.isEmpty ? "en" : supported.sorted().first
+    }
+
     /// The language every window of a dictation uses; nil = Automatic (guessed once per dictation).
     public static func resolve(stored: String?, preferred: [String], supported: Set<String>) -> String? {
         let s = stored ?? ""

@@ -52,7 +52,7 @@ def build_file(target: str, rel: str, ftype: str) -> str:
 package_refs = {n: add(p + ":package", f"isa = XCLocalSwiftPackageReference; relativePath = {q(p)};") for n, p in PACKAGES.items()}
 base = file_ref("Configuration/Base.xcconfig", "text.xcconfig")
 COMMON = ('IPHONEOS_DEPLOYMENT_TARGET = 18.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; '
-          'CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 1.1; CURRENT_PROJECT_VERSION = 25; CLANG_ENABLE_MODULES = YES; '
+          'CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 1.1.1; CURRENT_PROJECT_VERSION = 25; CLANG_ENABLE_MODULES = YES; '
           '"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64; ')
 
 

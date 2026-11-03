@@ -1029,6 +1029,12 @@ final class FreeFlowUITests: XCTestCase {
     }
 
     /// The keyboard step sees Full Access as soon as the Free Flow keyboard opens on that step, with no restart.
+    /// Build 37 helper: adds the Free Flow keyboard with Full Access on a simulator that lacks it (for HostAppUITests K1).
+    func testK0AddKeyboard() {
+        XCTAssertTrue(addFreeFlowKeyboard(), "could not add the Free Flow keyboard in Settings")
+        XCTAssertTrue(allowFullAccess(), "could not turn on Allow Full Access for the Free Flow keyboard")
+    }
+
     func test7SetupSeesFullAccess() {
         XCTAssertTrue(allowFullAccess(), "could not turn on Allow Full Access for the Free Flow keyboard")
         launch(onboarded: false, extra: ["-ffFreshKeyboard"])

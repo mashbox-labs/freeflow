@@ -27,7 +27,7 @@ struct ComfortKeyboard: View {
     var body: some View {
         GeometryReader { geo in
             let keys = ComfortMetrics.keys(kind: model.layout, size: geo.size, scale: scale, globe: showsGlobe, page: model.page,
-                                           field: model.field, hand: model.hand)
+                                           field: model.field, hand: model.hand, styleKey: model.styleKey)
             ZStack(alignment: .topLeading) {
                 // The drawing: FreeFlowKit KeyboardCanvas, shared with the app's layout previews. Taps between keys
                 // reach the touch surface because of the near-invisible floor on the controller's view
@@ -90,6 +90,8 @@ struct ComfortKeyboard: View {
             let layout = KeyLayoutKind.current, hand = KeyHand.current
             if model.layout != layout { model.layout = layout }
             if model.hand != hand { model.hand = hand }
+            let styleKey = SharedSession.styleKeyShown
+            if model.styleKey != styleKey { model.styleKey = styleKey }
         }
     }
 
@@ -163,9 +165,9 @@ enum ComfortMetrics {
 
     /// The keys of a layout at this size (FreeFlowKit KeyboardLayouts: the same code draws the Settings preview).
     static func keys(kind: KeyLayoutKind, size: CGSize, scale: CGFloat, globe: Bool, page: KeyPage = .letters,
-                     field: KeyField = .text, hand: KeyHand) -> [KeySlot] {
+                     field: KeyField = .text, hand: KeyHand, styleKey: Bool = true) -> [KeySlot] {
         KeyboardLayouts.keys(kind, width: size.width, height: size.height, isPad: isPad, scale: Double(scale),
-                             globe: globe, hand: hand, page: page, field: field)
+                             globe: globe, hand: hand, page: page, field: field, styleKey: styleKey)
     }
 
     /// Keyboard height: the action row stays 54 pt tall over the four key rows (iPhone: Apple's measured rows; iPad:
@@ -397,7 +399,8 @@ struct ListeningKeyboard: View {
 
     var body: some View {
         GeometryReader { geo in
-            let keys = ComfortMetrics.keys(kind: model.layout, size: geo.size, scale: scale, globe: showsGlobe, hand: model.hand)
+            let keys = ComfortMetrics.keys(kind: model.layout, size: geo.size, scale: scale, globe: showsGlobe, hand: model.hand,
+                                           styleKey: model.styleKey)
             let dictate = keys.first { $0.id == "mic" }?.visible ?? .zero
             // Build 26: .starting is the moment between the keyboard's ask after a trip and the app recording (the
             // pre-roll keeps what is said in it); "Listening, speak now" only once the app really records.

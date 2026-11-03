@@ -54,10 +54,13 @@ final class EngineDefaultTests: XCTestCase {
                                                  memoryBytes: 8 * gib, language: "en")
         XCTAssertEqual(ready?.id, "phonon-2", "on the device: dictation works at once")
         XCTAssertEqual(EngineDefault.coreMLFallback(after: "parakeet-ultra", failedIDs: [], readyIDs: ["parakeet-ultra", "phonon-2"],
-                                                    memoryBytes: 8 * gib, language: "de")?.id, "parakeet-redux",
-                       "Phonon-2 is English only: a German speaker gets Redux (to download)")
+                                                    memoryBytes: 8 * gib, language: "de")?.id, "whisper-turbo-ane",
+                       "Phonon-2 is English only: a German speaker on 8 GB gets the recommendation, our Whisper (build 39)")
         XCTAssertEqual(EngineDefault.coreMLFallback(after: "parakeet-ultra", failedIDs: [], readyIDs: ["parakeet-ultra"],
-                                                    memoryBytes: 8 * gib, language: "en")?.id, "parakeet-redux")
+                                                    memoryBytes: 8 * gib, language: "en")?.id, "whisper-turbo-ane")
+        // Below 7 GiB Whisper large doesn't fit: Redux, as before.
+        XCTAssertEqual(EngineDefault.coreMLFallback(after: "parakeet-ultra", failedIDs: [], readyIDs: ["parakeet-ultra"],
+                                                    memoryBytes: 6 * gib, language: "de")?.id, "parakeet-redux")
         let everyCoreML = Set(ModelCatalog.all.filter { !$0.engine.isCpp }.map(\.id))
         XCTAssertNil(EngineDefault.coreMLFallback(after: "parakeet-redux", failedIDs: everyCoreML, readyIDs: [],
                                                   memoryBytes: 8 * gib, language: "en"), "nothing left: the error stands")

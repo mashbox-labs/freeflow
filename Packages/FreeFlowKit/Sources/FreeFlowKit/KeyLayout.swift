@@ -19,6 +19,18 @@ public extension ComfortSpec {
         gap: 6, edge: 3, lift: 0)
 }
 
+public extension ComfortSpec {
+    /// Build 37: with Apple Intelligence cleanup off the style key does nothing, so the action row is the
+    /// hide key, a little wider (the style key's 84 pt content floor), and Dictate, which takes the rest. iPhone only
+    /// from build 38 (iPad: [KeySlot].withoutStyleKey).
+    static let phoneNoStyle: ComfortSpec = {
+        var s = phone
+        s.action = [Item("hide", weight: 0.02, minMM: 9.2, minPt: 84), Item("mic", weight: 1.0, minMM: 9.2)]
+        return s
+    }()
+    static func keyboard(styleKey: Bool) -> ComfortSpec { styleKey ? phone : phoneNoStyle }
+}
+
 public extension KeyHand {
     /// Which side the Dictate key sits on in Comfort (Left mirrors the top row for left thumbs).
     static var current: KeyHand {

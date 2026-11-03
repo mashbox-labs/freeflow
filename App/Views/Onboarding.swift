@@ -321,13 +321,14 @@ struct OnboardingView: View {
                 stat(models.active.downloadBytes.megabytes, "one download")
                 stat("None", "audio sent")
             }
-            ModelPicker(context: .setup)
+            SetupModelChoice()
             Text("Who made it").ffEyebrow()
             VStack(alignment: .leading, spacing: 12) {
                 creditRow("logo-moondream", "Moondream", "Parakeet Ultra and Parakeet Redux, CC-BY-4.0")
                 creditRow("logo-fermion", "Fermion Research", "Phonon-2, CC-BY-4.0")
                 creditRow("logo-conway", "Conway Research", "Underdog Bark 3.0 Clean and Bark 3.0 Pro, CC-BY-4.0")
                 creditRow("logo-nvidia", "NVIDIA", "Parakeet TDT 0.6B v3, the model they all start from and the C++ backup, CC-BY-4.0")
+                creditRow("logo-openai", "OpenAI", "Whisper large-v3-turbo, MIT. Core ML conversion by Argmax, MIT")
                 creditRow("logo-huggingface", "Hugging Face", "Hosts the model files. Each file you download is checked against a sha256 pinned in this build.")
             }
             .ffCard()
@@ -674,6 +675,7 @@ struct MakerLogo: View {
         case "Moondream": "logo-moondream"
         case "Fermion Research": "logo-fermion"
         case "Conway Research": "logo-conway"
+        case "OpenAI": "logo-openai"
         default: nil
         }
     }
@@ -682,7 +684,7 @@ struct MakerLogo: View {
 /// Trademark and source line shown under logos.
 struct LogoNotice: View {
     var body: some View {
-        Text("NVIDIA, Moondream, Fermion Research, Conway Research, Hugging Face and GitHub names and logos are trademarks of their owners. They appear here only to say who made each model and where it comes from, and do not mean those companies endorse Free Flow. Logo images: LobeHub Icons 1.97.1 (MIT); Moondream, Fermion Research and Conway Research: their Hugging Face profile pictures.")
+        Text("NVIDIA, OpenAI, Moondream, Fermion Research, Conway Research, Hugging Face and GitHub names and logos are trademarks of their owners. They appear here only to say who made each model and where it comes from, and do not mean those companies endorse Free Flow. Logo images: LobeHub Icons 1.97.1 (MIT); Moondream, Fermion Research and Conway Research: their Hugging Face profile pictures.")
             .font(FFFont.text(12.5))
             .foregroundStyle(Palette.faint)
     }

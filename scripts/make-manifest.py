@@ -21,6 +21,10 @@ MODELS = [
     ("whisper-tiny.tokenizer", "openai/whisper-tiny", None, "", ["tokenizer.json", "tokenizer_config.json"]),
     ("whisper-base.tokenizer", "openai/whisper-base", None, "", ["tokenizer.json", "tokenizer_config.json"]),
     ("whisper-small-f16.tokenizer", "openai/whisper-small", "973afd2496", "", ["tokenizer.json", "tokenizer_config.json"]),
+    # Whisper back (build 26): distil-large-v3 (distil-whisper, English, 2 decoder layers) on the same WhisperKit Core ML
+    # commit, its 594 MB build; tokenizer from distil-whisper's repo at a pinned commit.
+    ("distil-large-v3", WK[0], WK[1], "distil-whisper_distil-large-v3_594MB", None),
+    ("distil-large-v3.tokenizer", "distil-whisper/distil-large-v3", "8031d2e6ce6631b7fc45629dddfc00271116d981", "", ["tokenizer.json", "tokenizer_config.json"]),
     # C++ engine (FreeFlowEngine): ggml-org Parakeet v3 files for whisper.cpp's parakeet code, one weight type per file
     ("parakeet-gguf-q4_0", "ggml-org/parakeet-GGUF", "35156454", "", ["ggml-parakeet-tdt-0.6b-v3-q4_0.bin"]),
     ("parakeet-gguf-q4_k", "ggml-org/parakeet-GGUF", "35156454", "", ["ggml-parakeet-tdt-0.6b-v3-q4_k.bin"]),

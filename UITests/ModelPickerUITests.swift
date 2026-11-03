@@ -248,6 +248,93 @@ final class ModelPickerUITests: XCTestCase {
     }
 
     /// Download and delete one small model (Whisper tiny, 79 MB) through the real page; the model in use stays.
+    /// 2026-11-03 (iPad build 34: Use did not switch to the model). Needs Parakeet Ultra and our Whisper on
+    /// the simulator already. English device language: Use on Whisper says why it does not switch (never nothing).
+    /// Build 38, a fresh install: setup shows exactly two cards, each with its download size, under one line
+    /// on languages; never the full list. Build 39: our Whisper first (recommended, preselected) from 7.0 GiB, Parakeet
+    /// Ultra second; on 6 GB devices Parakeet first, Whisper second. FF_M6_GIB picks the simulated memory (default 7.5).
+    func testM6FirstRunChoice() {
+        app = XCUIApplication()
+        app.launchArguments = ["-onboarded", "NO", "-setup.step", "0"]
+        app.launchEnvironment["FF_SIM_MEMORY_GIB"] = ProcessInfo.processInfo.environment["FF_M6_GIB"] ?? "7.5"
+        app.launch()
+        XCTAssertTrue(app.buttons["onboarding.next"].waitForExistence(timeout: 30))
+        var n = 0
+        while !element("setupChoice").exists && n < 6 { app.buttons["onboarding.next"].tap(); sleep(1); n += 1 }
+        XCTAssertTrue(element("setupChoice").waitForExistence(timeout: 15), "the two-model choice did not appear in setup")
+        XCTAssertFalse(element("modelPicker").exists, "the full picker shows in setup")
+        XCTAssertTrue(element("setupLanguages").exists, "no language line above the cards")
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "select."))
+        XCTAssertEqual(cards.count, 2, "setup does not show exactly two cards")
+        let gib = Double(app.launchEnvironment["FF_SIM_MEMORY_GIB"]!) ?? 0
+        let parakeet = app.buttons["select.parakeet-ultra"], whisper = app.buttons["select.whisper-turbo-ane"]
+        XCTAssertTrue(element("setupSize.parakeet-ultra").label.contains("632 MB"), element("setupSize.parakeet-ultra").label)
+        let first = cards.element(boundBy: 0), second = cards.element(boundBy: 1)
+        let firstID = String(first.identifier.dropFirst("select.".count)), secondID = String(second.identifier.dropFirst("select.".count))
+        XCTAssertTrue(first.isSelected, "the first card is not preselected")
+        XCTAssertFalse(second.isSelected)
+        XCTAssertLessThan(element("model.\(firstID)").frame.minY, element("model.\(secondID)").frame.minY, "cards out of order")
+        if gib >= 7 {
+            // Build 39: 8 GB devices and up: our Whisper first and recommended, Parakeet Ultra second.
+            XCTAssertEqual([firstID, secondID], ["whisper-turbo-ane", "parakeet-ultra"])
+            XCTAssertTrue(element("setupSize.whisper-turbo-ane").label.contains("964 MB"), element("setupSize.whisper-turbo-ane").label)
+            XCTAssertTrue(element("setupLanguages").label.hasPrefix("Pick by the languages you speak. Whisper"), element("setupLanguages").label)
+        } else if gib >= 5 {
+            XCTAssertEqual([firstID, secondID], ["parakeet-ultra", "whisper-turbo-ane"])
+            XCTAssertTrue(element("setupLanguages").label.hasPrefix("Pick by the languages you speak. Parakeet"), element("setupLanguages").label)
+        } else {
+            XCTAssertNotEqual(secondID, "whisper-turbo-ane", "Whisper offered where it cannot run")
+        }
+        let card = element("setupChoice")
+        var k = 0
+        while card.frame.minY < 110 && k < 12 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.53)))
+            sleep(1); k += 1
+        }
+        shot("39-setup-choice")
+        second.tap(); sleep(1)
+        XCTAssertTrue(second.isSelected, "picking the second card did not move the selection")
+        first.tap(); sleep(1)
+        XCTAssertTrue(first.isSelected)
+        _ = (parakeet, whisper)
+    }
+
+    func testM4UseWhisperSwitches() {
+        launch(onboarded: true, memoryGiB: 7.5)
+        app.buttons["Models"].firstMatch.tap()
+        let use = app.buttons["use.whisper-turbo-ane"]
+        scrollTo(use)
+        XCTAssertTrue(use.waitForExistence(timeout: 20), "no Use button on our Whisper (not downloaded on this simulator?)")
+        use.tap()
+        // 2026-11-03: Use always switches. The Use button goes away once it is the model in use.
+        XCTAssertTrue(use.waitForNonExistence(timeout: 10), "Use did not switch to our Whisper")
+        XCTAssertFalse(app.alerts["Language"].exists, "a conflict popup with Automatic (Whisper speaks every language)")
+        shot("m4-use-whisper")
+    }
+
+    /// 2026-11-03 (a popup that changes it right there): Thai pinned, Use on Parakeet Ultra (which
+    /// doesn't speak Thai) switches and offers Automatic in one tap. Needs Ultra and our Whisper on the simulator.
+    func testM5LanguageConflictOneTap() {
+        app = XCUIApplication()
+        app.launchArguments = ["-onboarded", "YES", "-speechLanguage", "th", "-activeModel", "whisper-turbo-ane"]
+        app.launchEnvironment["FF_SIM_MEMORY_GIB"] = "7.5"
+        app.launch()
+        XCTAssertTrue(app.buttons["micButton"].waitForExistence(timeout: 30))
+        app.buttons["Models"].firstMatch.tap()
+        let use = app.buttons["use.parakeet-ultra"]
+        scrollTo(use)
+        XCTAssertTrue(use.waitForExistence(timeout: 20))
+        use.tap()
+        let alert = app.alerts["Language"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "no popup for a language Parakeet can't speak")
+        print("FFCONFLICT " + alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | "))
+        shot("m5-conflict")
+        alert.buttons["Use Automatic"].firstMatch.tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(use.waitForNonExistence(timeout: 10), "Use did not switch to Parakeet Ultra")
+    }
+
     func testM2DownloadThenDeleteSmallModel() {
         launchModels()
         let id = "whisper-tiny"

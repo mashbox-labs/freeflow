@@ -1,0 +1,11 @@
+Free Flow
+Copyright 2026 MASHBOX Labs (https://mashbox.gg)
+
+Free Flow's own code is licensed under the Apache License 2.0 (see LICENSE).
+
+Third-party components, fonts, data and images keep their own licences and terms, listed in
+THIRD-PARTY-NOTICES.md. This includes the vendored libraries under Packages/, the fonts, the
+autocorrect word list under ThirdParty/WordList (CC-BY-SA-4.0 and CC-BY-3.0 data), and the model
+makers' logos in App/Assets.xcassets/Logos, which are trademarks of their owners and are not
+licensed under this repository's licence. Speech models are downloaded separately and keep their
+own licences.

@@ -118,6 +118,6 @@ enum Credits {
         ("Google Books Ngram data", "Google. This compilation is licensed under a Creative Commons Attribution 3.0 Unported License. SymSpell's word frequencies come from it."),
         ("Spell Checking Oriented Word Lists (SCOWL)", "Copyright 2000-2018 by Kevin Atkinson. SymSpell uses it to keep genuine English words. Full notice under Third-party notices."),
         ("FrequencyWords", "Hermit Dave. Autocorrect word list: en_50k.txt from the 2018 lists, made from OpenSubtitles2018. MIT License for code. CC-by-sa-4.0 for content."),
-        ("Free Flow", "MASHBOX Labs. Source available under the PolyForm Noncommercial License 1.0.0: free for personal and noncommercial use, not for sale."),
+        ("Free Flow", "MASHBOX Labs. Open source under the Apache License 2.0."),
     ]
 }

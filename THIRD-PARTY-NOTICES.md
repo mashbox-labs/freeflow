@@ -1,6 +1,6 @@
 # Third-party notices
 
-Free Flow itself is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). It includes or downloads
+Free Flow itself is licensed under the Apache License 2.0 (see LICENSE and NOTICE). It includes or downloads
 the following. Each keeps its own licence, recorded as published at the pinned version or revision below.
 
 ## Code included in the app

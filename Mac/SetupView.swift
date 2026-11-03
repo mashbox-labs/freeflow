@@ -330,7 +330,7 @@ enum MacCredits {
         ("FluidAudio", "FluidInference. Licensed Apache-2.0."),
         ("Model downloads", "Hugging Face hosts the model files. Each file the Download button fetches is checked against a sha256 pinned in this build."),
         ("Outfit, Geist Mono, Big Shoulders Display, Barlow Semi Condensed", "Fonts licensed under the SIL Open Font License 1.1."),
-        ("Free Flow", "MASHBOX Labs. Source available under the PolyForm Noncommercial License 1.0.0: free for personal and noncommercial use, not for sale."),
+        ("Free Flow", "MASHBOX Labs. Open source under the Apache License 2.0."),
     ]
 }
 

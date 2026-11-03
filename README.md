@@ -11,7 +11,7 @@ Hold a key and talk. When you let go, your words go in where your cursor is. Spe
 
 No account, no analytics, no ads, no crash reporting. The only network use is downloading the speech model files you pick, from Hugging Face, at revisions pinned in the app.
 
-Licence: source available under the PolyForm Noncommercial License 1.0.0: free for personal, school and nonprofit use; it may not be sold. See `LICENSE`. Third-party components keep their own licences, listed in `THIRD-PARTY-NOTICES.md`.
+Licence: open source under the Apache License 2.0. See `LICENSE` and `NOTICE`. Third-party components keep their own licences, listed in `THIRD-PARTY-NOTICES.md`.
 
 ## Repository layout
 

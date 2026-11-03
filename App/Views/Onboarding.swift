@@ -328,7 +328,7 @@ struct OnboardingView: View {
                 creditRow("logo-fermion", "Fermion Research", "Phonon-2, CC-BY-4.0")
                 creditRow("logo-conway", "Conway Research", "Underdog Bark 3.0 Clean and Bark 3.0 Pro, CC-BY-4.0")
                 creditRow("logo-nvidia", "NVIDIA", "Parakeet TDT 0.6B v3, the model they all start from and the C++ backup, CC-BY-4.0")
-                creditRow("logo-openai", "OpenAI", "Whisper large-v3-turbo, MIT. Core ML conversion by Argmax, MIT")
+                creditRow("logo-openai", "OpenAI", "Whisper large-v3-turbo, MIT. Neural Engine Core ML build by MASHBOX Labs, MIT")
                 creditRow("logo-huggingface", "Hugging Face", "Hosts the model files. Each file you download is checked against a sha256 pinned in this build.")
             }
             .ffCard()
